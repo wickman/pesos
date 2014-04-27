@@ -19,7 +19,15 @@ setup(
   author_email='wickman@gmail.com',
   license='Apache License 2.0',
   package_dir={'': 'src'},
-  packages=['pesos', 'pesos.vendor'],
+  packages=[
+     'pesos',
+     'pesos.vendor',
+     'pesos.vendor.mesos',
+     'pesos.vendor.mesos.containerizer',
+     'pesos.vendor.mesos.internal',
+     'pesos.vendor.mesos.internal.log',
+     'pesos.vendor.mesos.internal.state',
+  ],
   install_requires=install_requires,
   zip_safe=True,
 )
