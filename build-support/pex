@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -e
+
+TWITTER_COMMON_PYTHON_VERSION=0.3.0
+
+if ! [ -f build-support/pex.venv/BOOTSTRAPPED ] || \
+    [ $(< build-support/pex.venv/BOOTSTRAPPED) != $TWITTER_COMMON_PYTHON_VERSION ]; then
+
+  echo Bootstrapping twitter.common.python @ $TWITTER_COMMON_PYTHON_VERSION
+  rm -fr build-support/pex.venv
+  ./build-support/virtualenv build-support/pex.venv
+  source build-support/pex.venv/bin/activate
+  pip install "twitter.common.python==$TWITTER_COMMON_PYTHON_VERSION"
+  echo $TWITTER_COMMON_PYTHON_VERSION > build-support/pex.venv/BOOTSTRAPPED
+fi
+source build-support/pex.venv/bin/activate
+exec pex "$@"

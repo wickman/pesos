@@ -1,0 +1,9 @@
+*.pyc
+*~
+*.egg-info
+.coverage
+.pants.*
+build-support/*.pex
+build-support/*.venv
+build-support/virtualenv-*
+dist/
