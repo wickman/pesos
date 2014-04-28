@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 from .api import SchedulerDriver
 from .util import unique_suffix
 from .vendor import mesos
@@ -11,10 +13,12 @@ class SchedulerProcess(ProtobufProcess):
     self.driver = driver
     self.scheduler = scheduler
     self.framework = framework
+    self.master = None
 
     # events
     self.connected = threading.Event()
     self.aborted = threading.Event()
+    self.failover = threading.Event()
 
     # credentials
     self.credential = credential
@@ -24,39 +28,173 @@ class SchedulerProcess(ProtobufProcess):
     # master detection
     self.detector = detector
 
+    # saved state
+    self.saved_offers = defaultdict(dict)
+    self.saved_slaves = {}
+
     super(SchedulerProcess, self).__init__(unique_suffix('scheduler'))
 
+  def ignore_if_aborted(method):
+    @functools.wraps(method)
+    def _wrapper(self, from_pid, *args, **kwargs):
+      if self.aborted.is_set():
+        log.info('Ignoring message from %s because the scheduler driver is aborted.' % from_pid)
+        return
+      return method(self, from_pid, *args, **kwargs)
+    return _wrapper
+
+  def ignore_if_disconnected(method):
+    @functools.wraps(method)
+    def _wrapper(self, *args, **kwargs):
+      if not self.connected.is_set():
+        log.info('Ignoring message from because the scheduler driver is disconnected.')
+        return
+      return method(self, *args, **kwargs)
+    return _wrapper
+
+  def valid_origin(self, from_pid):
+    if self.master != from_pid:
+      log.warning('Ignoring message from non-leading master %s' % from_pid)
+      return False
+    return True
+
   @ProtobufProcess.install(mesos.internal.FrameworkRegisteredMessage)
+  @ignore_if_aborted
   def registered(self, from_pid, message):
-    pass
+    if self.connected.is_set():
+      log.info('Ignoring registered message as we are already connected.')
+      return
+    if not self.valid_origin(from_pid):
+      return
+    self.framework.id = message.framework_id
+    self.connected.set()
+    self.failover.clear()
+
+    with timed(log.debug, 'scheduler::registered'):
+      self.scheduler.registered(self.driver, message.framework_id, message.master_info)
 
   @ProtobufProcess.install(mesos.internal.FrameworkReregisteredMessage)
+  @ignore_if_aborted
   def reregistered(self, from_pid, message):
-    pass
+    if self.connected.is_set():
+      log.info('Ignoring registered message as we are already connected.')
+      return
+    if not self.valid_origin(from_pid):
+      return
+    assert self.framework.id == message.framework_id
+    self.connected.set()
+    self.failover.clear()
+
+    with timed(log.debug, 'scheduler::reregistered'):
+      self.scheduler.reregistered(self.driver, message.master_info)
 
   @ProtobufProcess.install(mesos.internal.ResourceOffersMessage)
+  @ignore_if_disconnected
+  @ignore_if_aborted
   def resource_offers(self, from_pid, message):
-    pass
+    assert self.master is not None
+    if not self.valid_origin(from_pid):
+      return
+    for offer, pid in zip(message.offers, message.pids):
+      self.saved_offers[offer.id][offer.slave_id] = PID.from_string(pid)
+    with timed(log.debug, 'scheduler::resource_offers'):
+      self.scheduler.resource_offers(self.driver, message.offers)
 
   @ProtobufProcess.install(mesos.internal.RescindResourceOfferMessage)
+  @ignore_if_disconnected
+  @ignore_if_aborted
   def rescind_offer(self, from_pid, message):
-    pass
+    assert self.master is not None
+    if not self.valid_origin(from_pid):
+      return
+    log.info('Rescinding offer %s' % message.offer_id)
+    if not self.saved_offers.pop(message.offer_id, None):
+      log.warning('Offer %s not found.' % message.offer_id)
+    with timed(log.debug, 'scheduler::offer_rescinded'):
+      self.scheduler.offer_rescinded(self.driver, message.offer_id)
 
   @ProtobufProcess.install(mesos.internal.StatusUpdateMessage)
+  @ignore_if_aborted
   def status_update(self, from_pid, message):
     pass
 
+  @ignore_if_aborted
+  def status_update_acknowledgement(self, update, pid):
+    message = mesos.internal.StatusUpdateAcknowledgementMessage(
+        framework_id=self.framework.id,
+        slave_id=update.slave_id,
+        task_id=update.status.task_id,
+        uuid=update.uuid,
+    )
+    self.send(pid, message)
+
   @ProtobufProcess.install(mesos.internal.LostSlaveMessage)
+  @ignore_if_disconnected
+  @ignore_if_aborted
   def lost_slave(self, from_pid, message):
-    pass
+    assert self.master is not None
+    if not self.valid_origin(from_pid):
+      return
+    self.slave_pids.pop(message.slave_id)
+    with timed(log.debug, 'scheduler::slave_lost'):
+      self.scheduler.slave_lost(self.driver, message.slave_id)
 
   @ProtobufProcess.install(mesos.internal.ExecutorToFrameworkMessage)
+  @ignore_if_aborted
   def framework_message(self, from_pid, message):
-    pass
+    with timed(log.debug, 'scheduler::framework_message'):
+      self.scheduler.framework_message(self.driver,
+          message.executor_id, message.slave_id, message.data)
 
   @ProtobufProcess.install(mesos.internal.FrameworkErrorMessage)
+  @ignore_if_aborted
   def error(self, from_pid, message):
+    with timed(log.debug, 'scheduler::error'):
+      self.scheduler.error(self.driver, message.message)
+
+  def request_resources(self, requests):
     pass
+
+  def stop(self, failover=False):
+    pass
+
+  def abort(self):
+    pass
+
+  @ignore_if_disconnected
+  def kill_task(self, task_id):
+    assert self.master is not None
+    message = mesos.internal.KillTaskMessage(framework_id=self.framework.id, task_id=task_id)
+    self.send(self.master, message)
+
+  @ignore_if_disconnected
+  def request_resources(self, requests):
+    assert self.master is not None
+    message = mesos.internal.ResourceRequestMessage(
+        framework_id=self.framework.id,
+        requests=requests)
+    self.send(self.master, message)
+
+  def launch_tasks(self, offer_ids, tasks, filters):
+    pass
+
+  @ignore_if_disconnected
+  def revive_offers(self):
+    assert self.master is not None
+    message = mesos.internal.ReviveOffersMessage(framework_id=self.framework.id)
+    self.send(self.master, message)
+
+  @ignore_if_disconnected
+  def send_framework_message(self, executor_id, slave_id, data):
+    pass
+
+  @ignore_if_disconnected
+  def reconcile_tasks(self, statuses):
+    assert self.master is not None
+    message = mesos.internal.ReviveOffersMessage(framework_id=self.framework.id, statuses=statuses)
+    self.send(self.master, message)
+
+  del ignore_if_aborted
 
 
 class MesosSchedulerDriver(SchedulerDriver):
@@ -138,36 +276,56 @@ class MesosSchedulerDriver(SchedulerDriver):
   @locked
   def run(self):
     self.status = self.start()
-    if self.status is not mesos.DRIVER_RUNNING:
-      return self.status
-    else:
-      return self.join()
+    return self.status if self.status is not mesos.DRIVER_RUNNING else self.join()
 
   @locked
   def request_resources(self, requests):
-    pass
+    if self.status is not mesos.DRIVER_RUNNING:
+      return self.status
+    assert self.scheduler_process is not None
+    self.context.dispatch(self.scheduler_process.pid, 'request_resources', requests)
+    return self.status
 
   @locked
   def launch_tasks(self, offer_ids, tasks, filters=None):
-    pass
+    if self.status is not mesos.DRIVER_RUNNING:
+      return self.status
+    assert self.scheduler_process is not None
+    self.context.dispatch(self.scheduler_process.pid, 'launch_tasks', offer_ids, tasks, filters)
+    return self.status
 
   @locked
   def kill_task(self, task_id):
-    pass
+    if self.status is not mesos.DRIVER_RUNNING:
+      return self.status
+    assert self.scheduler_process is not None
+    self.context.dispatch(self.scheduler_process.pid, 'kill_task', task_id)
+    return self.status
 
-  @locked
   def decline_offer(self, offer_id, filters=None):
-    pass
+    return self.launch_tasks([offer_id], [], filters)
 
   @locked
   def revive_offers(self):
-    pass
+    if self.status is not mesos.DRIVER_RUNNING:
+      return self.status
+    assert self.scheduler_process is not None
+    self.context.dispatch(self.scheduler_process.pid, 'revive_offers')
+    return self.status
 
   @locked
   def send_framework_message(self, executor_id, slave_id, data):
-    pass
+    if self.status is not mesos.DRIVER_RUNNING:
+      return self.status
+    assert self.scheduler_process is not None
+    self.context.dispatch(self.scheduler_process.pid, 'send_framework_message',
+        executor_id, slave_id, data)
+    return self.status
 
   @locked
   def reconcile_tasks(self, statuses):
-    pass
-
+    if self.status is not mesos.DRIVER_RUNNING:
+      return self.status
+    assert self.scheduler_process is not None
+    self.context.dispatch(self.scheduler_process.pid, 'reconcile_tasks', statuses)
+    return self.status

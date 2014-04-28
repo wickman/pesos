@@ -67,7 +67,6 @@ class ExecutorProcess(ProtobufProcess):
   def ignore_if_aborted(method):
     @functools.wraps(method)
     def _wrapper(self, *args, **kwargs):
-      log.debug('Wrapper(%s) for %s invoked' % (self, method))
       if self.aborted.is_set():
         log.info('Ignoring message from slave %s because the driver is aborted.' % self.slave_id)
         return
@@ -231,6 +230,8 @@ class ExecutorProcess(ProtobufProcess):
 
   sendStatusUpdate = send_status_update
   sendFrameworkMessage = send_framework_message
+
+  del ignore_if_aborted
 
 
 class MesosExecutorDriver(ExecutorDriver):
