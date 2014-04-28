@@ -13,6 +13,10 @@ from compactor.process import ProtobufProcess
 log = logging.getLogger(__name__)
 
 
+class ShutdownProcess(Process):
+  pass
+
+
 class ExecutorProcess(ProtobufProcess):
   class Error(Exception): pass
 
@@ -141,23 +145,70 @@ class ExecutorProcess(ProtobufProcess):
   @ProtobufProcess.install(mesos.internal.ShutdownExecutorMessage)
   @ignore_if_aborted
   def shutdown(self, from_pid, message):
-    pass
+    self.context.spawn(ShutdownProcess())
+
+    with timed(log.debug, 'executor::shutdown'):
+      self.executor.shutdown(self.driver)
+
+    self.aborted.set()
 
   def stop(self):
-    pass
-
-  def abort(self):
-    pass
+    self.terminate()
 
   @ignore_if_aborted
   def exited(self, pid):
-    pass
+    if self.checkpoint and self.connected.is_set():
+      self.connected.clear()
+      log.info('Slave exited but framework has checkpointing enabled.')
+      log.info('Waiting %s to reconnect with %s' % (self.recovery_timeout, self.slave_id))
+      self.context.delay(self.recovery_timeout, self.pid, '_recovery_timeout', self.connection)
+      return
+
+    log.info('Slave exited.  Shutting down.')
+    self.connected.clear()
+    self.context.spawn(ShutdownProcess())
+
+    with timed(log.debug, 'executor::shutdown'):
+      self.executor.shutdown(self.driver)
+
+    self.aborted.set()
+
+  def _recovery_timeout(self, connection):
+    if self.connected.is_set():
+      return
+
+    if self.connection == connection:
+      log.info('Recovery timeout exceeded, shutting down.')
+      self.shutdown()
 
   def send_status_update(self, status):
-    pass
+    if self.status.state is mesos.TASK_STAGING:
+      log.error('Executor is not allowed to send TASK_STAGING, aborting!')
+      self.driver.abort()
+      with timed(log.debug, 'executor::error'):
+        self.executor.error(self.driver, 'Attempted to send TASK_STAGING status update.')
+      return
+
+    update = mesos.internal.StatusUpdate()
+    update.framework_id = self.framework_id
+    update.executor_id = self.executor_id
+    update.slave_id = self.slave_id
+    update.status = status
+    update.timestamp = time.time()
+    update.status.timestamp = update.timestamp
+    update.status.slave_id = self.slave_id
+    update.uuid = uuid.uuid4().get_bytes()
+    message = mesos.internal.StatusUpdateMessage(update=update, pid=self.pid)
+    self.updates[update.uuid] = update
+    self.send(self.slave, message)
 
   def send_framework_message(self, data):
-    pass
+    message = mesos.internal.ExecutorToFrameworkMessage()
+    message.slave_id = self.slave_id
+    message.framework_id = self.framework_id
+    message.executor_id = self.executor_id
+    message.data = data
+    self.send(self.slave, message)
 
   sendStatusUpdate = send_status_update
   sendFrameworkMessage = send_framework_message
