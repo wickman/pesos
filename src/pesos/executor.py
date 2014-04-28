@@ -7,9 +7,10 @@ import threading
 import uuid
 
 from .vendor import mesos
-from .util import timed
+from .util import timed, unique_suffix
 
 from compactor.context import Context
+from compactor.pid import PID
 from compactor.process import Process, ProtobufProcess
 
 
@@ -60,9 +61,12 @@ class ExecutorProcess(ProtobufProcess):
     self.updates = {}  # unacknowledged updates
     self.tasks = {}  # unacknowledged tasks
 
+    super(ExecutorProcess, self).__init__(unique_suffix('executor'))
+
   def ignore_if_aborted(method):
     @functools.wraps(method)
     def _wrapper(self, *args, **kwargs):
+      log.debug('Wrapper(%s) for %s invoked' % (self, method))
       if self.aborted.is_set():
         log.info('Ignoring message from slave %s because the driver is aborted.' % self.slave_id)
         return
@@ -77,7 +81,7 @@ class ExecutorProcess(ProtobufProcess):
           % message.slave_id)
       return
 
-    log.info('Executor registered on slave %s' % slave_id)
+    log.info('Executor registered on slave %s' % self.slave_id)
     self.connected.set()
     self.connection = uuid.uuid4()
 
@@ -165,6 +169,9 @@ class ExecutorProcess(ProtobufProcess):
 
   def stop(self):
     self.terminate()
+
+  def abort(self):
+    pass
 
   @ignore_if_aborted
   def exited(self, pid):
@@ -306,12 +313,14 @@ class MesosExecutorDriver(ExecutorDriver):
   def locked(method):
     @functools.wraps(method)
     def _wrapper(self, *args, **kw):
-      with self.locked:
+      with self.lock:
         return method(self, *args, **kw)
     return _wrapper
 
   @locked
   def start(self):
+    log.info('MesosExecutorDriver.start called')
+
     local = self.get_bool('MESOS_LOCAL')
     slave_pid = PID.from_string(self.get_or_else('MESOS_SLAVE_PID'))
     slave_id = self.get_or_else('MESOS_SLAVE_ID')
@@ -323,7 +332,7 @@ class MesosExecutorDriver(ExecutorDriver):
     if checkpoint:
       # TODO(wickman) Implement Duration.  Instead take seconds for now
       try:
-        recovery_timeout = int(self.get_or_else('MESOS_RECOVERY_TIMEOUT'))
+        recovery_timeout_secs = int(self.get_or_else('MESOS_RECOVERY_TIMEOUT'))
       except ValueError:
         raise RuntimeException('MESOS_RECOVERY_TIMEOUT must be in seconds.')
 
@@ -337,33 +346,38 @@ class MesosExecutorDriver(ExecutorDriver):
         executor_id,
         directory,
         checkpoint,
-        recovery_timeout
+        recovery_timeout_secs,
     )
-    self.executor_pid = self.context.spawn(self.executor_process)
+    self.context.spawn(self.executor_process)
     self.status = mesos.DRIVER_RUNNING
     return self.status
 
   @locked
   def stop(self):
+    log.info('MesosExecutorDriver.stop called')
     if self.status not in (mesos.DRIVER_RUNNING, mesos.DRIVER_ABORTED):
       return self.status
     assert self.executor_process is not None
-    self.context.dispatch(self.executor_pid, 'stop')
+    self.context.dispatch(self.executor_process.pid, 'stop')
     aborted = self.status == mesos.DRIVER_ABORTED
     self.status = mesos.DRIVER_STOPPED
     return mesos.DRIVER_ABORTED if aborted else self.status
 
   @locked
   def abort(self):
+    log.info('MesosExecutorDriver.abort called')
     if self.status is not mesos.DRIVER_RUNNING:
       return self.status
+    # TODO(wickman) Why do we set this first?
     self.executor_process.aborted.set()
-    self.context.dispatch(self.executor_pid, 'abort')
+    self.context.dispatch(self.executor_process.pid, 'abort')
     self.status = mesos.DRIVER_ABORTED
     return self.status
 
   @locked
   def join(self):
+    log.info('MesosExecutorDriver.join called')
+
     if self.status is not mesos.DRIVER_RUNNING:
       return self.status
 
@@ -374,6 +388,8 @@ class MesosExecutorDriver(ExecutorDriver):
     return self.status
 
   def run(self):
+    log.info('MesosExecutorDriver.run called')
+
     self.status = self.start()
     if self.status is not mesos.DRIVER_RUNNING:
       return self.status
@@ -385,7 +401,7 @@ class MesosExecutorDriver(ExecutorDriver):
     if self.status is not mesos.DRIVER_RUNNING:
       return self.status
     assert self.executor_process is not None
-    self.context.dispatch(self.executor_pid, 'send_status_update', status)
+    self.context.dispatch(self.executor_process.pid, 'send_status_update', status)
     return self.status
 
   @locked
@@ -393,6 +409,7 @@ class MesosExecutorDriver(ExecutorDriver):
     if self.status is not mesos.DRIVER_RUNNING:
       return self.status
     assert self.executor_process is not None
-    self.context.dispatch(self.executor_pid, 'send_framework_message', data)
+    self.context.dispatch(self.executor_process.pid, 'send_framework_message', data)
     return self.status
 
+  del locked
