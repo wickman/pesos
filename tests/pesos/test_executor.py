@@ -1,12 +1,8 @@
 import logging
 import os
 
-from pesos.executor import (
-    Executor,
-    ExecutorDriver,
-    MesosExecutorDriver,
-    ShutdownProcess,
-)
+from pesos.api import Executor, ExecutorDriver
+from pesos.executor import MesosExecutorDriver, ShutdownProcess
 from pesos.testing import MockSlave
 from pesos.vendor import mesos
 

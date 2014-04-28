@@ -6,6 +6,7 @@ import sys
 import threading
 import uuid
 
+from .api import ExecutorDriver
 from .vendor import mesos
 from .util import timed, unique_suffix
 
@@ -227,62 +228,6 @@ class ExecutorProcess(ProtobufProcess):
     message.executor_id = self.executor_id
     message.data = data
     self.send(self.slave, message)
-
-  sendStatusUpdate = send_status_update
-  sendFrameworkMessage = send_framework_message
-
-
-class Executor(object):
-  def registered(self, driver, executor_info, framework_info, slave_info):
-    pass
-
-  def reregistered(self, driver, slave_info):
-    pass
-
-  def disconnected(self, driver):
-    pass
-
-  def launch_task(self, driver, task):
-    pass
-
-  def kill_task(self, driver, task_id):
-    pass
-
-  def framework_message(self, data):
-    pass
-
-  def shutdown(self, driver):
-    pass
-
-  def error(self, driver, message):
-    pass
-
-  launchTask = launch_task
-  killTask = kill_task
-  frameworkMessage = framework_message
-
-
-class ExecutorDriver(object):
-  def start(self):
-    pass
-
-  def stop(self):
-    pass
-
-  def abort(self):
-    pass
-
-  def join(self):
-    pass
-
-  def run(self):
-    pass
-
-  def send_status_update(self, status):
-    pass
-
-  def send_framework_message(self, data):
-    pass
 
   sendStatusUpdate = send_status_update
   sendFrameworkMessage = send_framework_message
