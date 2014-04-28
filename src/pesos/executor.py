@@ -1,5 +1,8 @@
 import functools
 import logging
+import os
+import signal
+import sys
 import threading
 import uuid
 
@@ -7,14 +10,22 @@ from .vendor import mesos
 from .util import timed
 
 from compactor.context import Context
-from compactor.process import ProtobufProcess
+from compactor.process import Process, ProtobufProcess
 
 
 log = logging.getLogger(__name__)
 
 
 class ShutdownProcess(Process):
-  pass
+  EXECUTOR_SHUTDOWN_GRACE_PERIOD_SECONDS = 5
+
+  def initialize(self):
+    self.context.delay(self.EXECUTOR_SHUTDOWN_GRACE_PERIOD_SECONDS, self.pid, 'kill')
+
+  def kill(self):
+    os.killpg(0, signal.SIGKILL)
+    time.sleep(5)
+    sys.exit(-1)
 
 
 class ExecutorProcess(ProtobufProcess):
@@ -126,7 +137,7 @@ class ExecutorProcess(ProtobufProcess):
     uuid = uuid.UUID(bytes=message.uuid)
 
     log.info('Executor received status update acknowledgement %s for task %s of framework %s' % (
-        uuid, message.task_id, message.framework_id)
+        uuid, message.task_id, message.framework_id))
 
     if not self.updates.pop(uuid, None):
       log.error('Unknown status update %s!' % uuid)
@@ -179,7 +190,7 @@ class ExecutorProcess(ProtobufProcess):
 
     if self.connection == connection:
       log.info('Recovery timeout exceeded, shutting down.')
-      self.shutdown()
+      self.shutdown(self.pid, None)
 
   def send_status_update(self, status):
     if self.status.state is mesos.TASK_STAGING:
