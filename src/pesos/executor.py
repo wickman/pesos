@@ -4,6 +4,7 @@ import os
 import signal
 import sys
 import threading
+import time
 import uuid
 
 from .api import ExecutorDriver
@@ -103,7 +104,7 @@ class ExecutorProcess(ProtobufProcess):
   @ProtobufProcess.install(mesos.internal.ReconnectExecutorMessage)
   @ignore_if_aborted
   def reconnect(self, from_pid, message):
-    log.info('Received reconnect request from slave %s' % slave_id)
+    log.info('Received reconnect request from slave %s' % message.slave_id)
     self.slave = from_pid
     self.link(from_pid)
 
@@ -138,13 +139,13 @@ class ExecutorProcess(ProtobufProcess):
   @ProtobufProcess.install(mesos.internal.StatusUpdateAcknowledgementMessage)
   @ignore_if_aborted
   def status_update_acknowledgement(self, from_pid, message):
-    uuid = uuid.UUID(bytes=message.uuid)
+    ack_uuid = uuid.UUID(bytes=message.uuid)
 
     log.info('Executor received status update acknowledgement %s for task %s of framework %s' % (
-        uuid, message.task_id, message.framework_id))
+        ack_uuid, message.task_id, message.framework_id))
 
-    if not self.updates.pop(uuid, None):
-      log.error('Unknown status update %s!' % uuid)
+    if not self.updates.pop(ack_uuid, None):
+      log.error('Unknown status update %s!' % ack_uuid)
 
     if not self.tasks.pop(message.task_id, None):
       log.error('Unknown task %s!' % message.task_id)
@@ -267,7 +268,6 @@ class MesosExecutorDriver(ExecutorDriver):
   def start(self):
     log.info('MesosExecutorDriver.start called')
 
-    local = self.get_bool('MESOS_LOCAL')
     slave_pid = PID.from_string(self.get_or_else('MESOS_SLAVE_PID'))
     slave_id = self.get_or_else('MESOS_SLAVE_ID')
     framework_id = self.get_or_else('MESOS_FRAMEWORK_ID')
@@ -280,7 +280,7 @@ class MesosExecutorDriver(ExecutorDriver):
       try:
         recovery_timeout_secs = int(self.get_or_else('MESOS_RECOVERY_TIMEOUT'))
       except ValueError:
-        raise RuntimeException('MESOS_RECOVERY_TIMEOUT must be in seconds.')
+        raise RuntimeError('MESOS_RECOVERY_TIMEOUT must be in seconds.')
 
     assert self.executor_process is None
     self.executor_process = ExecutorProcess(

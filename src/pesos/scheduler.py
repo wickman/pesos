@@ -1,11 +1,17 @@
 from collections import defaultdict
+import functools
+import logging
+import threading
 
 from .api import SchedulerDriver
-from .util import unique_suffix
+from .util import timed, unique_suffix
 from .vendor import mesos
 
 from compactor.context import Context
+from compactor.pid import PID
 from compactor.process import ProtobufProcess
+
+log = logging.getLogger(__name__)
 
 
 class SchedulerProcess(ProtobufProcess):
@@ -152,9 +158,6 @@ class SchedulerProcess(ProtobufProcess):
     with timed(log.debug, 'scheduler::error'):
       self.scheduler.error(self.driver, message.message)
 
-  def request_resources(self, requests):
-    pass
-
   def stop(self, failover=False):
     pass
 
@@ -247,7 +250,7 @@ class MesosSchedulerDriver(SchedulerDriver):
     if self.scheduler_process is not None:
       self.context.dispatch(self.scheduler_process.pid, 'stop', failover)
 
-    aborted = status == mesos.DRIVER_ABORTED
+    aborted = self.status == mesos.DRIVER_ABORTED
     self.status = mesos.DRIVER_STOPPED
     return mesos.DRIVER_ABORTED if aborted else self.status
 

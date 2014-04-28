@@ -51,4 +51,3 @@ class MockSlave(ProtobufProcess):
 
   def send_shutdown(self):
     pass
-
