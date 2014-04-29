@@ -64,6 +64,13 @@ class SchedulerProcess(ProtobufProcess):
       return False
     return True
 
+  # Invoked externally when a new master is detected.
+  def detected(self, master):
+    pass
+
+  def register(self):
+    pass
+
   @ProtobufProcess.install(mesos.internal.FrameworkRegisteredMessage)
   @ignore_if_aborted
   def registered(self, from_pid, message):
