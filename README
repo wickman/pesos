@@ -5,4 +5,5 @@ to package:
   python setup.py sdist
 
 to run tests:
-  ./pants tests/pesos:all -v
+  tox
+
