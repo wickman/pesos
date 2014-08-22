@@ -11,7 +11,6 @@ setup(
   author='Brian Wickman',
   author_email='wickman@gmail.com',
   license='Apache License 2.0',
-  package_dir={'': 'src'},
   packages=[
     'pesos',
     'pesos.vendor',
