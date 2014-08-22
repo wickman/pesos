@@ -1,8 +1,8 @@
 import logging
 import os
 
-from pesos.api import Executor, ExecutorDriver
-from pesos.executor import MesosExecutorDriver, ShutdownProcess
+from pesos.api import Executor
+from pesos.executor import MesosExecutorDriver
 from pesos.testing import MockSlave
 from pesos.vendor import mesos
 
@@ -66,17 +66,23 @@ def test_mesos_executor_register():
   framework_id = mesos.FrameworkID(value='fake_framework_id')
   executor_id = mesos.ExecutorID(value='fake_executor_id')
   executor_info = mesos.ExecutorInfo(
-      executor_id=executor_id, framework_id=framework_id, command=command_info)
+    executor_id=executor_id,
+    framework_id=framework_id,
+    command=command_info
+  )
   framework_info = mesos.FrameworkInfo(user='fake_user', name='fake_framework_name')
 
   slave.send_registered(
-      driver.executor_process.pid,
-      executor_info,
-      framework_id,
-      framework_info)
+    driver.executor_process.pid,
+    executor_info,
+    framework_id,
+    framework_info
+  )
 
   driver.executor_process.connected.wait(timeout=1)
   assert driver.executor_process.connected.is_set()
+
+  time.sleep(0.5)  # We should wait a small amount of time
   executor.registered.assert_called_with(driver, executor_info, framework_info, slave.slave_info)
 
   assert driver.stop() == mesos.DRIVER_STOPPED

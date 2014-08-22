@@ -6,10 +6,11 @@ import time
 
 
 @contextmanager
-def timed(message, logger=print):
+def timed(logger=print, message=None):
   start = time.time()
   yield
-  logger('%s: %.1fms' % (message, 1000.0 * (time.time() - start)))
+  time_ms = 1000.0 * (time.time() - start)
+  logger("%s: %.1fms" % (message, time_ms))
 
 
 _ID_LOCK = threading.Lock()

@@ -23,11 +23,11 @@ class MockSlave(ProtobufProcess):
 
   def send_registered(self, to, executor_info, framework_id, framework_info):
     message = mesos.internal.ExecutorRegisteredMessage(
-        executor_info=executor_info,
-        framework_id=framework_id,
-        framework_info=framework_info,
-        slave_id=self.slave_id,
-        slave_info=self.slave_info
+      executor_info=executor_info,
+      framework_id=framework_id,
+      framework_info=framework_info,
+      slave_id=self.slave_id,
+      slave_info=self.slave_info
     )
     self.send(to, message)
 

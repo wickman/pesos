@@ -1,11 +1,14 @@
 from collections import defaultdict
+from getpass import getuser
 import functools
 import logging
 import threading
+import socket
 
 from .api import SchedulerDriver
 from .util import timed, unique_suffix
 from .vendor import mesos
+from .detector import StandaloneMasterDetector
 
 from compactor.context import Context
 from compactor.pid import PID
@@ -66,10 +69,22 @@ class SchedulerProcess(ProtobufProcess):
 
   # Invoked externally when a new master is detected.
   def detected(self, master):
-    pass
+    self.master = None
+    if master:
+      self.master = PID.from_string("master@%s" % master)
+      self.link(self.master)
 
   def register(self):
-    pass
+    if not self.master:
+      self.detected(self.detector.detect())
+
+    if self.master:
+      self.send(self.master, mesos.internal.RegisterFrameworkMessage(
+        framework=self.framework
+      ))
+    else:
+      log.info("Unable to detect a master, ABORT ABORT")
+      self.abort()
 
   @ProtobufProcess.install(mesos.internal.FrameworkRegisteredMessage)
   @ignore_if_aborted
@@ -79,7 +94,7 @@ class SchedulerProcess(ProtobufProcess):
       return
     if not self.valid_origin(from_pid):
       return
-    self.framework.id = message.framework_id
+    self.framework.id.value = message.framework_id.value
     self.connected.set()
     self.failover.clear()
 
@@ -109,7 +124,9 @@ class SchedulerProcess(ProtobufProcess):
     if not self.valid_origin(from_pid):
       return
     for offer, pid in zip(message.offers, message.pids):
-      self.saved_offers[offer.id][offer.slave_id] = PID.from_string(pid)
+      offer_id = offer.id.value
+      slave_id = offer.slave_id.value
+      self.saved_offers[offer_id][slave_id] = PID.from_string(pid)
     with timed(log.debug, 'scheduler::resource_offers'):
       self.scheduler.resource_offers(self.driver, message.offers)
 
@@ -120,24 +137,31 @@ class SchedulerProcess(ProtobufProcess):
     assert self.master is not None
     if not self.valid_origin(from_pid):
       return
-    log.info('Rescinding offer %s' % message.offer_id)
-    if not self.saved_offers.pop(message.offer_id, None):
-      log.warning('Offer %s not found.' % message.offer_id)
+    log.info('Rescinding offer %s' % message.offer_id.value)
+    if not self.saved_offers.pop(message.offer_id.value, None):
+      log.warning('Offer %s not found.' % message.offer_id.value)
     with timed(log.debug, 'scheduler::offer_rescinded'):
       self.scheduler.offer_rescinded(self.driver, message.offer_id)
 
   @ProtobufProcess.install(mesos.internal.StatusUpdateMessage)
+  @ignore_if_disconnected
   @ignore_if_aborted
   def status_update(self, from_pid, message):
-    pass
+    if not self.valid_origin(from_pid):
+      return
+    if message.pid:
+      sender_pid = PID.from_string(message.pid)
+      self.status_update_acknowledgement(message.update, sender_pid)
+    with timed(log.debug, 'scheduler::status_update'):
+      self.scheduler.status_update(self.driver, message.update.status)
 
   @ignore_if_aborted
   def status_update_acknowledgement(self, update, pid):
     message = mesos.internal.StatusUpdateAcknowledgementMessage(
-        framework_id=self.framework.id,
-        slave_id=update.slave_id,
-        task_id=update.status.task_id,
-        uuid=update.uuid,
+      framework_id=self.framework.id,
+      slave_id=update.slave_id,
+      task_id=update.status.task_id,
+      uuid=update.uuid,
     )
     self.send(pid, message)
 
@@ -156,8 +180,10 @@ class SchedulerProcess(ProtobufProcess):
   @ignore_if_aborted
   def framework_message(self, from_pid, message):
     with timed(log.debug, 'scheduler::framework_message'):
-      self.scheduler.framework_message(self.driver,
-          message.executor_id, message.slave_id, message.data)
+      self.scheduler.framework_message(
+        self.driver,
+        message.executor_id, message.slave_id, message.data
+      )
 
   @ProtobufProcess.install(mesos.internal.FrameworkErrorMessage)
   @ignore_if_aborted
@@ -165,11 +191,21 @@ class SchedulerProcess(ProtobufProcess):
     with timed(log.debug, 'scheduler::error'):
       self.scheduler.error(self.driver, message.message)
 
+  @ignore_if_aborted
   def stop(self, failover=False):
-    pass
+    if not failover:
+      self.connected.clear()
+      self.failover.set()
+      self.send(self.master, mesos.internal.UnregisterFrameworkMessage(
+        framework_id=self.framework.id
+      ))
+    self.context.stop()
 
+  @ignore_if_aborted
   def abort(self):
-    pass
+    self.connected.clear()
+    self.aborted.set()
+    self.context.stop()
 
   @ignore_if_disconnected
   def kill_task(self, task_id):
@@ -181,12 +217,62 @@ class SchedulerProcess(ProtobufProcess):
   def request_resources(self, requests):
     assert self.master is not None
     message = mesos.internal.ResourceRequestMessage(
-        framework_id=self.framework.id,
-        requests=requests)
+      framework_id=self.framework.id,
+      requests=requests
+    )
     self.send(self.master, message)
 
-  def launch_tasks(self, offer_ids, tasks, filters):
-    pass
+  def launch_tasks(self, offer_ids, tasks, filters=None):
+
+    # TODO(tarnfeld): Implement this, we need to tell the framework that the
+    # tasks were lost.
+    def task_lost(task):
+      pass
+
+    if not isinstance(offer_ids, list):
+      offer_ids = [offer_ids]
+
+    assert len(offer_ids) > 0
+
+    if filters is None:
+      filters = mesos.Filters()
+
+    lost_tasks = False
+
+    # Perform some sanity checking on the tasks before launching them
+    for task in tasks:
+      if not self.connected.is_set():
+        task_lost(task)
+        lost_tasks = True
+        continue
+      if task.HasField('executor') == task.HasField('command'):
+        log.error('A task must have either an executor or command')
+        task_lost(task)
+        lost_tasks = True
+        continue
+      if task.HasField('executor') and task.executor.HasField('framework_id') \
+         and task.executor.framework_id.value != self.framework.id.value:
+        log.error('Executor has an invalid framework ID')
+        task_lost(task)
+        lost_tasks = True
+        continue
+      if task.HasField('executor') and not task.executor.HasField('framework_id'):
+        task.executor.framework_id.value = self.framework.id.value
+
+    if lost_tasks:
+      return
+
+    message = mesos.internal.LaunchTasksMessage(
+      framework_id=self.framework.id,
+      tasks=tasks,
+      filters=filters
+    )
+
+    for offer_id in offer_ids:
+      field = message.offer_ids.add()
+      field.value = offer_id.value
+
+    self.send(self.master, message)
 
   @ignore_if_disconnected
   def revive_offers(self):
@@ -196,7 +282,16 @@ class SchedulerProcess(ProtobufProcess):
 
   @ignore_if_disconnected
   def send_framework_message(self, executor_id, slave_id, data):
-    pass
+    assert executor_id is not None
+    assert slave_id is not None
+    assert data is not None
+    message = mesos.internal.FrameworkToExecutorMessage(
+      framework_id=self.framework.id,
+      executor_id=executor_id,
+      slave_id=slave_id,
+      data=data
+    )
+    self.send(self.master, message)
 
   @ignore_if_disconnected
   def reconcile_tasks(self, statuses):
@@ -219,6 +314,10 @@ class MesosSchedulerDriver(SchedulerDriver):
     self.detector = None
     self.credential = credential
 
+    if not self.framework.user:
+      self.framework.user = getuser()
+    self.framework.hostname = socket.gethostname()
+
   def locked(method):
     @functools.wraps(method)
     def _wrapper(self, *args, **kw):
@@ -227,7 +326,10 @@ class MesosSchedulerDriver(SchedulerDriver):
     return _wrapper
 
   def _initialize_detector(self):
-    pass
+    if self.master_uri.startswith("zk:"):
+      raise Exception("The zookeeper master detector is not supported")
+
+    return StandaloneMasterDetector(self.master_uri)
 
   @locked
   def start(self):
@@ -239,13 +341,17 @@ class MesosSchedulerDriver(SchedulerDriver):
 
     assert self.scheduler_process is None
     self.scheduler_process = SchedulerProcess(
-        self,
-        self.scheduler,
-        self.framework,
-        self.credential,
-        self.detector,
+      self,
+      self.scheduler,
+      self.framework,
+      self.credential,
+      self.detector,
     )
     self.context.spawn(self.scheduler_process)
+
+    self.context.start()
+    self.context.loop.add_callback(self.scheduler_process.register)
+
     self.status = mesos.DRIVER_RUNNING
     return self.status
 
@@ -259,6 +365,7 @@ class MesosSchedulerDriver(SchedulerDriver):
 
     aborted = self.status == mesos.DRIVER_ABORTED
     self.status = mesos.DRIVER_STOPPED
+    self.lock.notify()
     return mesos.DRIVER_ABORTED if aborted else self.status
 
   @locked
@@ -270,6 +377,7 @@ class MesosSchedulerDriver(SchedulerDriver):
     self.scheduler_process.aborted.set()
     self.context.dispatch(self.scheduler_process.pid, 'abort')
     self.status = mesos.DRIVER_ABORTED
+    self.lock.notify()
     return self.status
 
   @locked
@@ -278,8 +386,9 @@ class MesosSchedulerDriver(SchedulerDriver):
       return self.status
 
     while self.status is mesos.DRIVER_RUNNING:
-      self.lock.wait()
+      self.lock.wait()  # Wait until the driver notifies us to break
 
+    log.info("Scheduler driver finished with status %d", self.status)
     assert self.status in (mesos.DRIVER_ABORTED, mesos.DRIVER_STOPPED)
     return self.status
 
@@ -312,8 +421,9 @@ class MesosSchedulerDriver(SchedulerDriver):
     self.context.dispatch(self.scheduler_process.pid, 'kill_task', task_id)
     return self.status
 
+  @locked
   def decline_offer(self, offer_id, filters=None):
-    return self.launch_tasks([offer_id], [], filters)
+    return self.launch_tasks(offer_id, [], filters)
 
   @locked
   def revive_offers(self):
@@ -328,8 +438,13 @@ class MesosSchedulerDriver(SchedulerDriver):
     if self.status is not mesos.DRIVER_RUNNING:
       return self.status
     assert self.scheduler_process is not None
-    self.context.dispatch(self.scheduler_process.pid, 'send_framework_message',
-        executor_id, slave_id, data)
+    self.context.dispatch(
+      self.scheduler_process.pid,
+      'send_framework_message',
+      executor_id,
+      slave_id,
+      data
+    )
     return self.status
 
   @locked
