@@ -43,6 +43,10 @@ class SchedulerProcess(ProtobufProcess):
 
     super(SchedulerProcess, self).__init__(unique_suffix('scheduler'))
 
+  def initialize(self):
+    super(SchedulerProcess, self).initialize()
+    self.detector.detect().add_done_callback(self.detected)
+
   def ignore_if_aborted(method):
     @functools.wraps(method)
     def _wrapper(self, from_pid, *args, **kwargs):
@@ -67,24 +71,44 @@ class SchedulerProcess(ProtobufProcess):
       return False
     return True
 
-  # Invoked externally when a new master is detected.
-  def detected(self, master):
-    self.master = None
-    if master:
+  @ignore_if_aborted
+  def detected(self, master_future):
+    try:
+      master = master_future.get()
+    except Exception as e:
+      log.fatal('Failed to detect master: %s' % e)
+      # TODO(wickman) Are we on MainThread?  If not, this might not actually terminate anything
+      # but this thread.
+      sys.exit(1)
+
+    if self.connected.is_set():
+      self.connected.clear()
+      with timed(log.debug, 'scheduler::disconnected'):
+        self.scheduler.disconnected(self.driver)
+
+    # TODO(wickman) Implement authentication.
+    if self.master:
       self.master = PID.from_string("master@%s" % master)
       self.link(self.master)
-
-  def register(self):
-    if not self.master:
-      self.detected(self.detector.detect())
-
-    if self.master:
-      self.send(self.master, mesos.internal.RegisterFrameworkMessage(
-        framework=self.framework
-      ))
     else:
-      log.info("Unable to detect a master, ABORT ABORT")
-      self.abort()
+      self.master = None
+
+    self.__maybe_register()
+
+    self.detector.detect().add_done_callback(self.detected)
+
+  def __maybe_register(self):
+    if self.connected.is_set() or self.master is None:
+      return
+
+    # We have never registered before
+    if not self.framework.id.value:
+      message = mesos.internal.RegisterFrameworkMessage(framework=self.framework)
+    else:
+      message = mesos.internal.ReregisterFrameworkMessage(
+          framework=self.framework, failover=self.failover.is_set())
+
+    self.send(self.master, message)
 
   @ProtobufProcess.install(mesos.internal.FrameworkRegisteredMessage)
   @ignore_if_aborted
@@ -199,13 +223,11 @@ class SchedulerProcess(ProtobufProcess):
       self.send(self.master, mesos.internal.UnregisterFrameworkMessage(
         framework_id=self.framework.id
       ))
-    self.context.stop()
 
   @ignore_if_aborted
   def abort(self):
     self.connected.clear()
     self.aborted.set()
-    self.context.stop()
 
   @ignore_if_disconnected
   def kill_task(self, task_id):
@@ -223,7 +245,6 @@ class SchedulerProcess(ProtobufProcess):
     self.send(self.master, message)
 
   def launch_tasks(self, offer_ids, tasks, filters=None):
-
     # TODO(tarnfeld): Implement this, we need to tell the framework that the
     # tasks were lost.
     def task_lost(task):
@@ -341,17 +362,13 @@ class MesosSchedulerDriver(SchedulerDriver):
 
     assert self.scheduler_process is None
     self.scheduler_process = SchedulerProcess(
-      self,
-      self.scheduler,
-      self.framework,
-      self.credential,
-      self.detector,
+        self,
+        self.scheduler,
+        self.framework,
+        self.credential,
+        self.detector,
     )
     self.context.spawn(self.scheduler_process)
-
-    self.context.start()
-    self.context.loop.add_callback(self.scheduler_process.register)
-
     self.status = mesos.DRIVER_RUNNING
     return self.status
 
