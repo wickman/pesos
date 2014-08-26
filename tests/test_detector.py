@@ -7,28 +7,20 @@ import threading
 def test_standalone_immediate_detection():
   detector = StandaloneMasterDetector(leader='foo')
   event = threading.Event()
-  
-  def detector_callback(future):
-    assert future.result() == 'foo'
-    event.set()
-  
-  detector.detect(previous=None).add_done_callback(detector_callback)
+  future = detector.detect(previous=None)
+  future.add_done_callback(lambda f: event.set())
   event.wait(timeout=1.0)
   assert event.is_set()
+  assert future.result() == 'foo'
 
 
 def test_standalone_change_detection():
   detector = StandaloneMasterDetector(leader='foo')
   event = threading.Event()
-
-  def detector_callback(future):
-    assert future.result() == 'bar'
-    event.set()
-  
   future = detector.detect(previous='foo')
-  future.add_done_callback(detector_callback)
+  future.add_done_callback(lambda f: event.set())
   assert future.running()
-  
+  assert not event.is_set()
   detector.appoint('bar')
   event.wait(timeout=1.0)
   assert event.is_set()

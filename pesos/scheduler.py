@@ -4,6 +4,7 @@ import functools
 import logging
 import threading
 import socket
+import sys
 
 from .api import SchedulerDriver
 from .util import timed, unique_suffix
@@ -45,7 +46,7 @@ class SchedulerProcess(ProtobufProcess):
 
   def initialize(self):
     super(SchedulerProcess, self).initialize()
-    self.detector.detect().add_done_callback(self.detected)
+    self.detector.detect(previous=self.master).add_done_callback(self.detected)
 
   def ignore_if_aborted(method):
     @functools.wraps(method)
@@ -74,7 +75,7 @@ class SchedulerProcess(ProtobufProcess):
   @ignore_if_aborted
   def detected(self, master_future):
     try:
-      master = master_future.get()
+      master_uri = master_future.result()
     except Exception as e:
       log.fatal('Failed to detect master: %s' % e)
       # TODO(wickman) Are we on MainThread?  If not, this might not actually terminate anything
@@ -87,15 +88,16 @@ class SchedulerProcess(ProtobufProcess):
         self.scheduler.disconnected(self.driver)
 
     # TODO(wickman) Implement authentication.
-    if self.master:
-      self.master = PID.from_string("master@%s" % master)
+    if master_uri:
+      log.info('New master detected: %s' % master_uri)
+      self.master = PID.from_string("master@%s" % master_uri)
       self.link(self.master)
     else:
       self.master = None
 
     self.__maybe_register()
 
-    self.detector.detect().add_done_callback(self.detected)
+    self.detector.detect(previous=master_uri).add_done_callback(self.detected)
 
   def __maybe_register(self):
     if self.connected.is_set() or self.master is None:
@@ -104,9 +106,11 @@ class SchedulerProcess(ProtobufProcess):
     # We have never registered before
     if not self.framework.id.value:
       message = mesos.internal.RegisterFrameworkMessage(framework=self.framework)
+      log.info('Registering framework: %s' % message)
     else:
       message = mesos.internal.ReregisterFrameworkMessage(
           framework=self.framework, failover=self.failover.is_set())
+      log.info('Reregistering framework: %s' % message)
 
     self.send(self.master, message)
 
@@ -335,6 +339,7 @@ class MesosSchedulerDriver(SchedulerDriver):
     self.detector = None
     self.credential = credential
 
+    # XXX
     if not self.framework.user:
       self.framework.user = getuser()
     self.framework.hostname = socket.gethostname()

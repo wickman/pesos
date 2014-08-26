@@ -21,7 +21,7 @@ setup(
     'pesos.vendor.mesos.internal.state',
   ],
   install_requires=[
-    'compactor==0.1.2',
+    'compactor==0.1.3',
     'protobuf==2.5.0',
     'futures==2.1.6',
   ],
