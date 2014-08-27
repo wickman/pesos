@@ -23,11 +23,11 @@ class MockSlave(ProtobufProcess):
 
   def send_registered(self, to, executor_info, framework_id, framework_info):
     message = mesos.internal.ExecutorRegisteredMessage(
-      executor_info=executor_info,
-      framework_id=framework_id,
-      framework_info=framework_info,
-      slave_id=self.slave_id,
-      slave_info=self.slave_info
+        executor_info=executor_info,
+        framework_id=framework_id,
+        framework_info=framework_info,
+        slave_id=self.slave_id,
+        slave_info=self.slave_info
     )
     self.send(to, message)
 
@@ -37,8 +37,14 @@ class MockSlave(ProtobufProcess):
   def send_reconnect(self):
     pass
 
-  def send_run_task(self):
-    pass
+  def send_run_task(self, to, framework_pid, framework_id, framework_info, task):
+    message = mesos.internal.RunTaskMessage(
+        framework_id=framework_id,
+        framework_info=framework_info,
+        task=task,
+        pid=framework_pid
+    )
+    self.send(to, message)
 
   def send_kill_task(self):
     pass

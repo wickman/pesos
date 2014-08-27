@@ -11,7 +11,7 @@ from .util import timed, unique_suffix
 
 from compactor.context import Context
 from compactor.pid import PID
-from compactor.process import ProtobufProcess
+from compactor.process import Process, ProtobufProcess
 
 
 log = logging.getLogger(__name__)
@@ -34,6 +34,7 @@ class ExecutorProcess(ProtobufProcess):
     self.executor_id = executor_id
 
     self.aborted = threading.Event()
+    self.stopped = threading.Event()
     self.connected = threading.Event()
 
     self.directory = directory
@@ -54,9 +55,10 @@ class ExecutorProcess(ProtobufProcess):
       return method(self, *args, **kwargs)
     return _wrapper
 
-  def register(self):
-    log.info('Registering executor with slave %s', self.slave)
+  def initialize(self):
+    super(ExecutorProcess, self).initialize()
 
+    log.info('Registering executor with slave %s' % self.slave)
     message = mesos.internal.RegisterExecutorMessage()
     message.framework_id.value = self.framework_id
     message.executor_id.value = self.executor_id
@@ -65,20 +67,16 @@ class ExecutorProcess(ProtobufProcess):
   @ProtobufProcess.install(mesos.internal.ExecutorRegisteredMessage)
   @ignore_if_aborted
   def registered(self, from_pid, message):
-    if self.aborted.is_set():
-      log.info('Ignoring registered message from slave %s because the driver is aborted.', message.slave_id)
-      return
-
     log.info('Executor registered on slave %s' % self.slave_id)
     self.connected.set()
     self.connection = uuid.uuid4()
 
     with timed(log.debug, 'executor::registered'):
       self.executor.registered(
-        self.driver,
-        message.executor_info,
-        message.framework_info,
-        message.slave_info
+          self.driver,
+          message.executor_info,
+          message.framework_info,
+          message.slave_info
       )
 
   @ProtobufProcess.install(mesos.internal.ExecutorReregisteredMessage)
@@ -161,10 +159,14 @@ class ExecutorProcess(ProtobufProcess):
 
     self.stop()
 
+  @Process.install('stop')
   @ignore_if_aborted
   def stop(self):
-    self.context.stop()
+    self.stopped.set()
+    self.terminate()
+    # Shutdown?
 
+  @Process.install('abort')
   @ignore_if_aborted
   def abort(self):
     self.connected.clear()
@@ -233,7 +235,6 @@ class ExecutorProcess(ProtobufProcess):
 
 
 class MesosExecutorDriver(ExecutorDriver):
-
   @classmethod
   def get_env(cls, key):
     try:
@@ -248,7 +249,7 @@ class MesosExecutorDriver(ExecutorDriver):
     return os.environ[key] == "1"
 
   def __init__(self, executor, context=None):
-    self.context = context or Context()
+    self.context = context or Context.singleton()
     self.executor = executor
     self.executor_process = None
     self.executor_pid = None
@@ -283,22 +284,18 @@ class MesosExecutorDriver(ExecutorDriver):
 
     assert self.executor_process is None
     self.executor_process = ExecutorProcess(
-      slave_pid,
-      self,
-      self.executor,
-      slave_id,
-      framework_id,
-      executor_id,
-      directory,
-      checkpoint,
-      recovery_timeout_secs,
+        slave_pid,
+        self,
+        self.executor,
+        slave_id,
+        framework_id,
+        executor_id,
+        directory,
+        checkpoint,
+        recovery_timeout_secs,
     )
 
     self.context.spawn(self.executor_process)
-
-    self.context.start()
-    self.executor_process.link(slave_pid)
-    self.context.loop.add_callback(self.executor_process.register)
 
     log.info("Started driver")
 

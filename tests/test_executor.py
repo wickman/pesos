@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 
 from pesos.api import Executor
 from pesos.executor import MesosExecutorDriver
@@ -82,7 +83,6 @@ def test_mesos_executor_register():
   driver.executor_process.connected.wait(timeout=1)
   assert driver.executor_process.connected.is_set()
 
-  time.sleep(0.5)  # We should wait a small amount of time
   executor.registered.assert_called_with(driver, executor_info, framework_info, slave.slave_info)
 
   assert driver.stop() == mesos.DRIVER_STOPPED
