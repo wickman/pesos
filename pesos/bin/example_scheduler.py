@@ -2,8 +2,6 @@ import getpass
 import logging
 import sys
 
-from compactor.context import Context
-
 from pesos.api import Scheduler
 from pesos.scheduler import MesosSchedulerDriver
 from pesos.vendor.mesos import FrameworkInfo
@@ -22,9 +20,6 @@ class ExampleScheduler(Scheduler):
 
 
 def main(args):
-  context = Context()
-  context.start()
-
   scheduler = ExampleScheduler()
   framework = FrameworkInfo(
       user=getpass.getuser(),
@@ -34,7 +29,6 @@ def main(args):
       scheduler=scheduler,
       framework=framework,
       master_uri=args[0],
-      context=context,
   )
 
   print('Starting driver')
@@ -42,9 +36,6 @@ def main(args):
 
   print('Joining driver')
   driver.join()
-
-  print('Stopping context')
-  context.stop()
 
 
 if __name__ == '__main__':

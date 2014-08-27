@@ -97,8 +97,11 @@ class SchedulerProcess(ProtobufProcess):
 
     self.__maybe_register()
 
+    # TODO(wickman) Detectors should likely operate on PIDs and not URIs.
     self.detector.detect(previous=master_uri).add_done_callback(self.detected)
 
+  # TODO(wickman) Implement reliable registration -- i.e. __maybe_register() should operate
+  # in a loop until self.connected.is_set().
   def __maybe_register(self):
     if self.connected.is_set() or self.master is None:
       return
@@ -186,10 +189,10 @@ class SchedulerProcess(ProtobufProcess):
   @ignore_if_aborted
   def status_update_acknowledgement(self, update, pid):
     message = mesos.internal.StatusUpdateAcknowledgementMessage(
-      framework_id=self.framework.id,
-      slave_id=update.slave_id,
-      task_id=update.status.task_id,
-      uuid=update.uuid,
+        framework_id=self.framework.id,
+        slave_id=update.slave_id,
+        task_id=update.status.task_id,
+        uuid=update.uuid,
     )
     self.send(pid, message)
 
@@ -209,8 +212,10 @@ class SchedulerProcess(ProtobufProcess):
   def framework_message(self, from_pid, message):
     with timed(log.debug, 'scheduler::framework_message'):
       self.scheduler.framework_message(
-        self.driver,
-        message.executor_id, message.slave_id, message.data
+          self.driver,
+          message.executor_id,
+          message.slave_id,
+          message.data
       )
 
   @ProtobufProcess.install(mesos.internal.FrameworkErrorMessage)
@@ -225,7 +230,7 @@ class SchedulerProcess(ProtobufProcess):
       self.connected.clear()
       self.failover.set()
       self.send(self.master, mesos.internal.UnregisterFrameworkMessage(
-        framework_id=self.framework.id
+          framework_id=self.framework.id
       ))
 
   @ignore_if_aborted
@@ -243,8 +248,8 @@ class SchedulerProcess(ProtobufProcess):
   def request_resources(self, requests):
     assert self.master is not None
     message = mesos.internal.ResourceRequestMessage(
-      framework_id=self.framework.id,
-      requests=requests
+        framework_id=self.framework.id,
+        requests=requests,
     )
     self.send(self.master, message)
 
@@ -288,9 +293,9 @@ class SchedulerProcess(ProtobufProcess):
       return
 
     message = mesos.internal.LaunchTasksMessage(
-      framework_id=self.framework.id,
-      tasks=tasks,
-      filters=filters
+        framework_id=self.framework.id,
+        tasks=tasks,
+        filters=filters,
     )
 
     for offer_id in offer_ids:
@@ -311,10 +316,10 @@ class SchedulerProcess(ProtobufProcess):
     assert slave_id is not None
     assert data is not None
     message = mesos.internal.FrameworkToExecutorMessage(
-      framework_id=self.framework.id,
-      executor_id=executor_id,
-      slave_id=slave_id,
-      data=data
+        framework_id=self.framework.id,
+        executor_id=executor_id,
+        slave_id=slave_id,
+        data=data,
     )
     self.send(self.master, message)
 
@@ -329,7 +334,7 @@ class SchedulerProcess(ProtobufProcess):
 
 class MesosSchedulerDriver(SchedulerDriver):
   def __init__(self, scheduler, framework, master_uri, credential=None, context=None):
-    self.context = context or Context()
+    self.context = context or Context.singleton()
     self.scheduler = scheduler
     self.scheduler_process = None
     self.master_uri = master_uri
@@ -338,11 +343,6 @@ class MesosSchedulerDriver(SchedulerDriver):
     self.status = mesos.DRIVER_NOT_STARTED
     self.detector = None
     self.credential = credential
-
-    # XXX
-    if not self.framework.user:
-      self.framework.user = getuser()
-    self.framework.hostname = socket.gethostname()
 
   def locked(method):
     @functools.wraps(method)
@@ -461,11 +461,11 @@ class MesosSchedulerDriver(SchedulerDriver):
       return self.status
     assert self.scheduler_process is not None
     self.context.dispatch(
-      self.scheduler_process.pid,
-      'send_framework_message',
-      executor_id,
-      slave_id,
-      data
+        self.scheduler_process.pid,
+        'send_framework_message',
+        executor_id,
+        slave_id,
+        data,
     )
     return self.status
 
