@@ -235,7 +235,6 @@ class ExecutorProcess(ProtobufProcess):
 
 
 class MesosExecutorDriver(ExecutorDriver):
-
   @classmethod
   def get_env(cls, key):
     try:
@@ -250,7 +249,7 @@ class MesosExecutorDriver(ExecutorDriver):
     return os.environ[key] == "1"
 
   def __init__(self, executor, context=None):
-    self.context = context or Context()
+    self.context = context or Context.singleton()
     self.executor = executor
     self.executor_process = None
     self.executor_pid = None
@@ -297,12 +296,6 @@ class MesosExecutorDriver(ExecutorDriver):
     )
 
     self.context.spawn(self.executor_process)
-
-    """ XXX nope
-    self.context.start()
-    self.executor_process.link(slave_pid)
-    self.context.loop.add_callback(self.executor_process.register)
-    """
 
     log.info("Started driver")
 
