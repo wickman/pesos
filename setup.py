@@ -24,6 +24,7 @@ setup(
     'compactor==0.1.3',
     'protobuf==2.5.0',
     'futures==2.1.6',
+    'mesos.interface==0.20.0',
   ],
   zip_safe=True
 )

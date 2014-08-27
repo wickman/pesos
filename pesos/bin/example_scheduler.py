@@ -2,9 +2,10 @@ import getpass
 import logging
 import sys
 
-from pesos.api import Scheduler
-from pesos.scheduler import MesosSchedulerDriver
+from pesos.scheduler import PesosSchedulerDriver
 from pesos.vendor.mesos import FrameworkInfo
+
+from mesos.interface import Scheduler
 
 
 logging.basicConfig(level=logging.DEBUG)
@@ -25,7 +26,7 @@ def main(args):
       user=getpass.getuser(),
       name='example',
   )
-  driver = MesosSchedulerDriver(
+  driver = PesosSchedulerDriver(
       scheduler=scheduler,
       framework=framework,
       master_uri=args[0],
