@@ -249,7 +249,7 @@ class PesosExecutorDriver(ExecutorDriver):
     return os.environ[key] == "1"
 
   def __init__(self, executor, context=None):
-    self.context = context or Context()
+    self.context = context or Context.singleton()
     self.executor = executor
     self.executor_process = None
     self.executor_pid = None
