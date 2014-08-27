@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 
 class SchedulerProcess(ProtobufProcess):
-  def __init__(self, driver, scheduler, framework, credential=None, detector=None):
+  def __init__(self, driver, scheduler, framework, credential=None, detector=None, clock=time):
     self.driver = driver
     self.scheduler = scheduler
     self.framework = framework
@@ -41,6 +41,9 @@ class SchedulerProcess(ProtobufProcess):
     # saved state
     self.saved_offers = defaultdict(dict)
     self.saved_slaves = {}
+    
+    # clock
+    self.clock = clock
 
     super(SchedulerProcess, self).__init__(unique_suffix('scheduler'))
 
@@ -175,6 +178,10 @@ class SchedulerProcess(ProtobufProcess):
   @ignore_if_disconnected
   @ignore_if_aborted
   def status_update(self, from_pid, message):
+    if from_pid == self.pid:
+      # Special-case locally-sent status updates.
+      self.scheduler.status_update(self.driver, message.update.status)
+      return
     if not self.valid_origin(from_pid):
       return
     if message.pid:
@@ -248,44 +255,52 @@ class SchedulerProcess(ProtobufProcess):
     )
     self.send(self.master, message)
 
+  def _local_lost(self, task, reason):
+    update = mesos.StatusUpdate(
+        framework_id=self.framework.id,
+        status=mesos.TaskStatus(
+            task_id=task.id,
+            state=mesos.TASK_LOST,
+            message=reason,
+            timestamp=now,
+            uuid=uuid.uuid4().get_bytes(),
+        )
+    )
+    self.send(self.pid, update)    
+
   def launch_tasks(self, offer_ids, tasks, filters=None):
-    # TODO(tarnfeld): Implement this, we need to tell the framework that the
-    # tasks were lost.
-    def task_lost(task):
-      pass
+    """Launch tasks.
+    
+    :param offer_ids: A list of :class:``pesos.vendor.mesos.OfferId` objects as referenced from the
+      resource offer.
+    :type offer_ids: ``list``
+    :param tasks: A list of :class:``pesos.vendor.mesos.TaskInfo`` objects.
+    :type tasks: ``list``
+    :keyword filters: (optional) A :class:``pesos.vendor.mesos.Filters`` object for
+      filtering subsequent offers.
+    """
+    
+    now = self.clock.time()
+    
+    # Disconnected -- self-deliver TASK_LOST
+    if not self.connected.is_set():
+      for task in tasks:
+        self._local_lost(task, 'Master Disconnected')
+      return
 
-    if not isinstance(offer_ids, list):
-      offer_ids = [offer_ids]
-
-    assert len(offer_ids) > 0
-
-    if filters is None:
-      filters = mesos.Filters()
-
-    lost_tasks = False
+    filters = filters or mesos.Filters()
 
     # Perform some sanity checking on the tasks before launching them
     for task in tasks:
-      if not self.connected.is_set():
-        task_lost(task)
-        lost_tasks = True
-        continue
       if task.HasField('executor') == task.HasField('command'):
-        log.error('A task must have either an executor or command')
-        task_lost(task)
-        lost_tasks = True
+        self._local_lost(task, 'Malformed: A task must have either an executor or command')
         continue
-      if task.HasField('executor') and task.executor.HasField('framework_id') \
-         and task.executor.framework_id.value != self.framework.id.value:
-        log.error('Executor has an invalid framework ID')
-        task_lost(task)
-        lost_tasks = True
-        continue
+      if task.HasField('executor') and task.executor.HasField('framework_id'):
+        if task.executor.framework_id.value != self.framework.id.value:
+          self._local_lost(task, 'Malformed: Executor has an invalid framework ID')
+          continue
       if task.HasField('executor') and not task.executor.HasField('framework_id'):
         task.executor.framework_id.value = self.framework.id.value
-
-    if lost_tasks:
-      return
 
     message = mesos.internal.LaunchTasksMessage(
       framework_id=self.framework.id,
@@ -461,11 +476,11 @@ class MesosSchedulerDriver(SchedulerDriver):
       return self.status
     assert self.scheduler_process is not None
     self.context.dispatch(
-      self.scheduler_process.pid,
-      'send_framework_message',
-      executor_id,
-      slave_id,
-      data
+        self.scheduler_process.pid,
+        'send_framework_message',
+        executor_id,
+        slave_id,
+        data
     )
     return self.status
 

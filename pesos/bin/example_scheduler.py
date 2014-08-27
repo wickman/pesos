@@ -13,6 +13,9 @@ logging.basicConfig(level=logging.DEBUG)
 
 
 class ExampleScheduler(Scheduler):
+  def __init__(self):
+    self.hosts = {}
+
   def registered(self, driver, framework_id, master_info):
     print('registered: framework_id: %s, master_info: %s' % (framework_id, master_info))
 
@@ -20,6 +23,7 @@ class ExampleScheduler(Scheduler):
     for offer in offers:
       print('offer: %s' % offer)
 
+  
 
 def main(args):
   context = Context()
