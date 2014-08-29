@@ -3,5 +3,8 @@
 *.egg-info
 .coverage
 /.tox
-/third_party
 /htmlcov
+/third_party/*egg
+/third_party/*gz
+/third_party/*whl
+/third_party/*zip

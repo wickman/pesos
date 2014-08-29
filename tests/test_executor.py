@@ -2,12 +2,12 @@ import logging
 import os
 import time
 
-from pesos.api import Executor
-from pesos.executor import MesosExecutorDriver
+from pesos.executor import PesosExecutorDriver
 from pesos.testing import MockSlave
 from pesos.vendor import mesos
 
 from compactor.context import Context
+from mesos.interface import Executor
 
 try:
   from unittest import mock
@@ -38,7 +38,7 @@ def test_mesos_executor_driver_init():
   os.environ['MESOS_SLAVE_PID'] = str(slave.pid)
 
   executor = Executor()
-  driver = MesosExecutorDriver(executor, context=context)
+  driver = PesosExecutorDriver(executor, context=context)
   assert driver.start() == mesos.DRIVER_RUNNING
   assert driver.stop() == mesos.DRIVER_STOPPED
   assert driver.join() == mesos.DRIVER_STOPPED
@@ -60,7 +60,7 @@ def test_mesos_executor_register():
   executor = mock.MagicMock()
   executor.registered = mock.MagicMock()
 
-  driver = MesosExecutorDriver(executor, context=context)
+  driver = PesosExecutorDriver(executor, context=context)
   assert driver.start() == mesos.DRIVER_RUNNING
 
   command_info = mesos.CommandInfo(value='wat')

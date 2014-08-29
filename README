@@ -1,9 +1,0 @@
-pesos is a pure python implementation of the mesos framework api based upon
-https://github.com/wickman/compactor
-
-to package:
-  python setup.py sdist
-
-to run tests:
-  tox
-
