@@ -4,14 +4,16 @@ Pesos
 pesos is a pure python implementation of the mesos framework api based upon
 `compactor <https://github.com/wickman/compactor>`_.
 
+
 Using
 =====
 
 pesos is intended to provide drop-in replacements for the mesos.native
-MesosExecutorDriver and MesosSchedulerDriver.  Bindings are provided by the
-Mesos project but require libmesos which can be challenging to build and package.
+MesosExecutorDriver and MesosSchedulerDriver.  While Python bindings are
+provided by the Mesos project, they require libmesos which can be
+challenging to build and package.  pesos requires no C extensions to run.
 
-to use:
+To use:
 
 .. code-block:: python
 
@@ -20,6 +22,8 @@ to use:
         from pesos.scheduler import PesosSchedulerDriver as MesosSchedulerDriver
     except ImportError:
         from mesos.native import MesosExecutorDriver, MesosSchedulerDriver
+
+Then use the pesos-provided equivalents as you would the native Mesos versions.
 
 
 Testing
@@ -36,8 +40,8 @@ pesos uses `tox <https://tox.rtfd.org>` for its test harness.  To run tests,
 Caveats
 =======
 
-Pesos relies upon Compactor, which currently requires tornado>=4.1 which has
-not yet been released.  To run the tests, you must clone and generate a
-source distribution of tornado off master (which will produce
-tornado==4.1.dev1) and copy it into the ``third_party`` directory, where it
-will be used by tox for testing.
+pesos relies upon compactor, which currently requires a version of tornado
+(tornado>=4.1) that has not yet been released.  To run the tests, you must
+clone and generate a source distribution of tornado off master (which,
+currently, will produce tornado==4.1.dev1) and copy it into the
+``third_party`` directory, where it will be used by tox for testing.
