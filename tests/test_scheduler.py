@@ -1,5 +1,6 @@
-from pesos.api import Scheduler, SchedulerDriver
-from pesos.scheduler import SchedulerProcess, MesosSchedulerDriver
+from pesos.scheduler import SchedulerProcess, PesosSchedulerDriver
+
+from mesos.interface import Scheduler, SchedulerDriver
 
 
 def test_noop():
