@@ -5,6 +5,7 @@ env:
   - TOXENV=py27
   - TOXENV=pypy
 install:
+  - third_party/travis_setup.sh
   - pip install tox
 script:
   - tox -v
