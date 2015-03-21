@@ -3,7 +3,7 @@ import logging
 import sys
 
 from pesos.scheduler import PesosSchedulerDriver
-from pesos.vendor.mesos import FrameworkInfo
+from pesos.vendor.mesos.mesos_pb2 import FrameworkInfo
 
 from mesos.interface import Scheduler
 

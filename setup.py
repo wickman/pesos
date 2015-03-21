@@ -1,6 +1,6 @@
-from setuptools import setup
+from setuptools import find_packages, setup
 
-__version__ = '0.1.0'
+__version__ = '0.2.0-dev0'
 
 
 setup(
@@ -11,20 +11,11 @@ setup(
   author='Brian Wickman',
   author_email='wickman@gmail.com',
   license='Apache License 2.0',
-  packages=[
-    'pesos',
-    'pesos.vendor',
-    'pesos.vendor.mesos',
-    'pesos.vendor.mesos.containerizer',
-    'pesos.vendor.mesos.internal',
-    'pesos.vendor.mesos.internal.log',
-    'pesos.vendor.mesos.internal.state',
-  ],
+  packages=find_packages(exclude=['tests']),
   install_requires=[
-    'compactor==0.1.3',
-    'protobuf==2.5.0',
+    'compactor[pb]==0.2.0-dev0',
     'futures==2.1.6',
-    'mesos.interface==0.20.0',
+    'mesos.interface==0.21.1',
   ],
   zip_safe=True
 )

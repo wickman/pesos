@@ -8,7 +8,8 @@ import sys
 
 from .detector import StandaloneMasterDetector
 from .util import camel_call, timed, unique_suffix
-from .vendor import mesos
+from .vendor.mesos import mesos_pb2
+from .vendor.mesos.internal import messages_pb2 as internal
 
 from compactor.context import Context
 from compactor.pid import PID
@@ -108,16 +109,16 @@ class SchedulerProcess(ProtobufProcess):
 
     # We have never registered before
     if not self.framework.id.value:
-      message = mesos.internal.RegisterFrameworkMessage(framework=self.framework)
+      message = internal.RegisterFrameworkMessage(framework=self.framework)
       log.info('Registering framework: %s' % message)
     else:
-      message = mesos.internal.ReregisterFrameworkMessage(
+      message = internal.ReregisterFrameworkMessage(
           framework=self.framework, failover=self.failover.is_set())
       log.info('Reregistering framework: %s' % message)
 
     self.send(self.master, message)
 
-  @ProtobufProcess.install(mesos.internal.FrameworkRegisteredMessage)
+  @ProtobufProcess.install(internal.FrameworkRegisteredMessage)
   @ignore_if_aborted
   def registered(self, from_pid, message):
     if self.connected.is_set():
@@ -133,7 +134,7 @@ class SchedulerProcess(ProtobufProcess):
       camel_call(self.scheduler, 'registered',
           self.driver, message.framework_id, message.master_info)
 
-  @ProtobufProcess.install(mesos.internal.FrameworkReregisteredMessage)
+  @ProtobufProcess.install(internal.FrameworkReregisteredMessage)
   @ignore_if_aborted
   def reregistered(self, from_pid, message):
     if self.connected.is_set():
@@ -148,7 +149,7 @@ class SchedulerProcess(ProtobufProcess):
     with timed(log.debug, 'scheduler::reregistered'):
       camel_call(self.scheduler, 'reregistered', self.driver, message.master_info)
 
-  @ProtobufProcess.install(mesos.internal.ResourceOffersMessage)
+  @ProtobufProcess.install(internal.ResourceOffersMessage)
   @ignore_if_disconnected
   @ignore_if_aborted
   def resource_offers(self, from_pid, message):
@@ -162,7 +163,7 @@ class SchedulerProcess(ProtobufProcess):
     with timed(log.debug, 'scheduler::resource_offers'):
       camel_call(self.scheduler, 'resource_offers', self.driver, message.offers)
 
-  @ProtobufProcess.install(mesos.internal.RescindResourceOfferMessage)
+  @ProtobufProcess.install(internal.RescindResourceOfferMessage)
   @ignore_if_disconnected
   @ignore_if_aborted
   def rescind_offer(self, from_pid, message):
@@ -175,7 +176,7 @@ class SchedulerProcess(ProtobufProcess):
     with timed(log.debug, 'scheduler::offer_rescinded'):
       camel_call(self.scheduler, 'offer_rescinded', self.driver, message.offer_id)
 
-  @ProtobufProcess.install(mesos.internal.StatusUpdateMessage)
+  @ProtobufProcess.install(internal.StatusUpdateMessage)
   @ignore_if_disconnected
   @ignore_if_aborted
   def status_update(self, from_pid, message):
@@ -189,7 +190,7 @@ class SchedulerProcess(ProtobufProcess):
 
   @ignore_if_aborted
   def status_update_acknowledgement(self, update, pid):
-    message = mesos.internal.StatusUpdateAcknowledgementMessage(
+    message = internal.StatusUpdateAcknowledgementMessage(
         framework_id=self.framework.id,
         slave_id=update.slave_id,
         task_id=update.status.task_id,
@@ -197,7 +198,7 @@ class SchedulerProcess(ProtobufProcess):
     )
     self.send(pid, message)
 
-  @ProtobufProcess.install(mesos.internal.LostSlaveMessage)
+  @ProtobufProcess.install(internal.LostSlaveMessage)
   @ignore_if_disconnected
   @ignore_if_aborted
   def lost_slave(self, from_pid, message):
@@ -208,7 +209,7 @@ class SchedulerProcess(ProtobufProcess):
     with timed(log.debug, 'scheduler::slave_lost'):
       camel_call(self.scheduler, 'slave_lost', self.driver, message.slave_id)
 
-  @ProtobufProcess.install(mesos.internal.ExecutorToFrameworkMessage)
+  @ProtobufProcess.install(internal.ExecutorToFrameworkMessage)
   @ignore_if_aborted
   def framework_message(self, from_pid, message):
     with timed(log.debug, 'scheduler::framework_message'):
@@ -219,7 +220,7 @@ class SchedulerProcess(ProtobufProcess):
           message.data
       )
 
-  @ProtobufProcess.install(mesos.internal.FrameworkErrorMessage)
+  @ProtobufProcess.install(internal.FrameworkErrorMessage)
   @ignore_if_aborted
   def error(self, from_pid, message):
     with timed(log.debug, 'scheduler::error'):
@@ -230,7 +231,7 @@ class SchedulerProcess(ProtobufProcess):
     if not failover:
       self.connected.clear()
       self.failover.set()
-      self.send(self.master, mesos.internal.UnregisterFrameworkMessage(
+      self.send(self.master, internal.UnregisterFrameworkMessage(
           framework_id=self.framework.id
       ))
 
@@ -242,13 +243,13 @@ class SchedulerProcess(ProtobufProcess):
   @ignore_if_disconnected
   def kill_task(self, task_id):
     assert self.master is not None
-    message = mesos.internal.KillTaskMessage(framework_id=self.framework.id, task_id=task_id)
+    message = internal.KillTaskMessage(framework_id=self.framework.id, task_id=task_id)
     self.send(self.master, message)
 
   @ignore_if_disconnected
   def request_resources(self, requests):
     assert self.master is not None
-    message = mesos.internal.ResourceRequestMessage(
+    message = internal.ResourceRequestMessage(
         framework_id=self.framework.id,
         requests=requests,
     )
@@ -266,7 +267,7 @@ class SchedulerProcess(ProtobufProcess):
     assert len(offer_ids) > 0
 
     if filters is None:
-      filters = mesos.Filters()
+      filters = mesos_pb2.Filters()
 
     lost_tasks = False
 
@@ -293,7 +294,7 @@ class SchedulerProcess(ProtobufProcess):
     if lost_tasks:
       return
 
-    message = mesos.internal.LaunchTasksMessage(
+    message = internal.LaunchTasksMessage(
         framework_id=self.framework.id,
         tasks=tasks,
         filters=filters,
@@ -308,7 +309,7 @@ class SchedulerProcess(ProtobufProcess):
   @ignore_if_disconnected
   def revive_offers(self):
     assert self.master is not None
-    message = mesos.internal.ReviveOffersMessage(framework_id=self.framework.id)
+    message = internal.ReviveOffersMessage(framework_id=self.framework.id)
     self.send(self.master, message)
 
   @ignore_if_disconnected
@@ -316,7 +317,7 @@ class SchedulerProcess(ProtobufProcess):
     assert executor_id is not None
     assert slave_id is not None
     assert data is not None
-    message = mesos.internal.FrameworkToExecutorMessage(
+    message = internal.FrameworkToExecutorMessage(
         framework_id=self.framework.id,
         executor_id=executor_id,
         slave_id=slave_id,
@@ -327,7 +328,7 @@ class SchedulerProcess(ProtobufProcess):
   @ignore_if_disconnected
   def reconcile_tasks(self, statuses):
     assert self.master is not None
-    message = mesos.internal.ReviveOffersMessage(framework_id=self.framework.id, statuses=statuses)
+    message = internal.ReviveOffersMessage(framework_id=self.framework.id, statuses=statuses)
     self.send(self.master, message)
 
   del ignore_if_aborted
@@ -341,7 +342,7 @@ class PesosSchedulerDriver(SchedulerDriver):
     self.master_uri = master_uri
     self.framework = framework
     self.lock = threading.Condition()
-    self.status = mesos.DRIVER_NOT_STARTED
+    self.status = mesos_pb2.DRIVER_NOT_STARTED
     self.detector = None
     self.credential = credential
 
@@ -360,7 +361,7 @@ class PesosSchedulerDriver(SchedulerDriver):
 
   @locked
   def start(self):
-    if self.status is not mesos.DRIVER_NOT_STARTED:
+    if self.status is not mesos_pb2.DRIVER_NOT_STARTED:
       return self.status
 
     if self.detector is None:
@@ -375,54 +376,54 @@ class PesosSchedulerDriver(SchedulerDriver):
         self.detector,
     )
     self.context.spawn(self.scheduler_process)
-    self.status = mesos.DRIVER_RUNNING
+    self.status = mesos_pb2.DRIVER_RUNNING
     return self.status
 
   @locked
   def stop(self, failover=False):
-    if self.status not in (mesos.DRIVER_RUNNING, mesos.DRIVER_ABORTED):
+    if self.status not in (mesos_pb2.DRIVER_RUNNING, mesos_pb2.DRIVER_ABORTED):
       return self.status
 
     if self.scheduler_process is not None:
       self.context.dispatch(self.scheduler_process.pid, 'stop', failover)
 
-    aborted = self.status == mesos.DRIVER_ABORTED
-    self.status = mesos.DRIVER_STOPPED
+    aborted = self.status == mesos_pb2.DRIVER_ABORTED
+    self.status = mesos_pb2.DRIVER_STOPPED
     self.lock.notify()
-    return mesos.DRIVER_ABORTED if aborted else self.status
+    return mesos_pb2.DRIVER_ABORTED if aborted else self.status
 
   @locked
   def abort(self):
-    if self.status is not mesos.DRIVER_RUNNING:
+    if self.status is not mesos_pb2.DRIVER_RUNNING:
       return self.status
 
     assert self.scheduler_process is not None
     self.scheduler_process.aborted.set()
     self.context.dispatch(self.scheduler_process.pid, 'abort')
-    self.status = mesos.DRIVER_ABORTED
+    self.status = mesos_pb2.DRIVER_ABORTED
     self.lock.notify()
     return self.status
 
   @locked
   def join(self):
-    if self.status is not mesos.DRIVER_RUNNING:
+    if self.status is not mesos_pb2.DRIVER_RUNNING:
       return self.status
 
-    while self.status is mesos.DRIVER_RUNNING:
+    while self.status is mesos_pb2.DRIVER_RUNNING:
       self.lock.wait()  # Wait until the driver notifies us to break
 
     log.info("Scheduler driver finished with status %d", self.status)
-    assert self.status in (mesos.DRIVER_ABORTED, mesos.DRIVER_STOPPED)
+    assert self.status in (mesos_pb2.DRIVER_ABORTED, mesos_pb2.DRIVER_STOPPED)
     return self.status
 
   @locked
   def run(self):
     self.status = self.start()
-    return self.status if self.status is not mesos.DRIVER_RUNNING else self.join()
+    return self.status if self.status is not mesos_pb2.DRIVER_RUNNING else self.join()
 
   @locked
   def requestResources(self, requests):
-    if self.status is not mesos.DRIVER_RUNNING:
+    if self.status is not mesos_pb2.DRIVER_RUNNING:
       return self.status
     assert self.scheduler_process is not None
     self.context.dispatch(self.scheduler_process.pid, 'request_resources', requests)
@@ -430,7 +431,7 @@ class PesosSchedulerDriver(SchedulerDriver):
 
   @locked
   def launchTasks(self, offer_ids, tasks, filters=None):
-    if self.status is not mesos.DRIVER_RUNNING:
+    if self.status is not mesos_pb2.DRIVER_RUNNING:
       return self.status
     assert self.scheduler_process is not None
     self.context.dispatch(self.scheduler_process.pid, 'launch_tasks', offer_ids, tasks, filters)
@@ -438,7 +439,7 @@ class PesosSchedulerDriver(SchedulerDriver):
 
   @locked
   def killTask(self, task_id):
-    if self.status is not mesos.DRIVER_RUNNING:
+    if self.status is not mesos_pb2.DRIVER_RUNNING:
       return self.status
     assert self.scheduler_process is not None
     self.context.dispatch(self.scheduler_process.pid, 'kill_task', task_id)
@@ -450,7 +451,7 @@ class PesosSchedulerDriver(SchedulerDriver):
 
   @locked
   def reviveOffers(self):
-    if self.status is not mesos.DRIVER_RUNNING:
+    if self.status is not mesos_pb2.DRIVER_RUNNING:
       return self.status
     assert self.scheduler_process is not None
     self.context.dispatch(self.scheduler_process.pid, 'revive_offers')
@@ -458,7 +459,7 @@ class PesosSchedulerDriver(SchedulerDriver):
 
   @locked
   def sendFrameworkMessage(self, executor_id, slave_id, data):
-    if self.status is not mesos.DRIVER_RUNNING:
+    if self.status is not mesos_pb2.DRIVER_RUNNING:
       return self.status
     assert self.scheduler_process is not None
     self.context.dispatch(
@@ -472,7 +473,7 @@ class PesosSchedulerDriver(SchedulerDriver):
 
   @locked
   def reconcileTasks(self, statuses):
-    if self.status is not mesos.DRIVER_RUNNING:
+    if self.status is not mesos_pb2.DRIVER_RUNNING:
       return self.status
     assert self.scheduler_process is not None
     self.context.dispatch(self.scheduler_process.pid, 'reconcile_tasks', statuses)

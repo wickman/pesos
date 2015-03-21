@@ -1,7 +1,8 @@
 import logging
 import threading
 
-from pesos.vendor import mesos
+from pesos.vendor.mesos import mesos_pb2
+from pesos.vendor.mesos.internal import messages_pb2 as internal
 
 from compactor.context import Context
 from compactor.process import ProtobufProcess
@@ -14,7 +15,7 @@ class SimpleReceiver(ProtobufProcess):
     self.receive_event = threading.Event()
     super(SimpleReceiver, self).__init__('receiver')
 
-  @ProtobufProcess.install(mesos.internal.UpdateFrameworkMessage)
+  @ProtobufProcess.install(internal.UpdateFrameworkMessage)
   def update_framework(self, from_pid, message):
     assert message.framework_id.value == 'simple_framework'
     assert message.pid == 'simple_pid'
@@ -26,8 +27,8 @@ class SimpleSender(ProtobufProcess):
     super(SimpleSender, self).__init__('sender')
 
   def send_simple(self, to, framework_id, pid):
-    self.send(to, mesos.internal.UpdateFrameworkMessage(
-        framework_id=mesos.FrameworkID(value=framework_id), pid=pid))
+    self.send(to, internal.UpdateFrameworkMessage(
+        framework_id=mesos_pb2.FrameworkID(value=framework_id), pid=pid))
 
 
 def test_simple_message_pass():

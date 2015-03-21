@@ -35,13 +35,3 @@ pesos uses `tox <https://tox.rtfd.org>`_ as a test harness.  To run tests,
 .. code-block:: bash
 
     $ tox
-
-
-Caveats
-=======
-
-pesos relies upon compactor, which currently requires a version of tornado
-(tornado>=4.1) that has not yet been released.  To run the tests, you must
-clone and generate a source distribution of tornado off master (which,
-currently, will produce tornado==4.1.dev1) and copy it into the
-``third_party`` directory, where it will be used by tox for testing.

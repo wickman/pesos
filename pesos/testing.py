@@ -2,7 +2,8 @@ import socket
 import uuid
 
 from .util import unique_suffix
-from .vendor import mesos
+from .vendor.mesos import mesos_pb2 as mesos
+from .vendor.mesos.internal import messages_pb2 as internal
 
 from compactor.process import ProtobufProcess
 
@@ -22,7 +23,7 @@ class MockSlave(ProtobufProcess):
     super(MockSlave, self).__init__(unique_suffix('slave'))
 
   def send_registered(self, to, executor_info, framework_id, framework_info):
-    message = mesos.internal.ExecutorRegisteredMessage(
+    message = internal.ExecutorRegisteredMessage(
         executor_info=executor_info,
         framework_id=framework_id,
         framework_info=framework_info,
@@ -38,7 +39,7 @@ class MockSlave(ProtobufProcess):
     pass
 
   def send_run_task(self, to, framework_pid, framework_id, framework_info, task):
-    message = mesos.internal.RunTaskMessage(
+    message = internal.RunTaskMessage(
         framework_id=framework_id,
         framework_info=framework_info,
         task=task,

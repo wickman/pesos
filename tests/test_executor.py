@@ -4,7 +4,7 @@ import time
 
 from pesos.executor import PesosExecutorDriver
 from pesos.testing import MockSlave
-from pesos.vendor import mesos
+from pesos.vendor.mesos import mesos_pb2
 
 from compactor.context import Context
 from mesos.interface import Executor
@@ -39,9 +39,9 @@ def test_mesos_executor_driver_init():
 
   executor = Executor()
   driver = PesosExecutorDriver(executor, context=context)
-  assert driver.start() == mesos.DRIVER_RUNNING
-  assert driver.stop() == mesos.DRIVER_STOPPED
-  assert driver.join() == mesos.DRIVER_STOPPED
+  assert driver.start() == mesos_pb2.DRIVER_RUNNING
+  assert driver.stop() == mesos_pb2.DRIVER_STOPPED
+  assert driver.join() == mesos_pb2.DRIVER_STOPPED
 
   context.stop()
 
@@ -61,17 +61,17 @@ def test_mesos_executor_register():
   executor.registered = mock.MagicMock()
 
   driver = PesosExecutorDriver(executor, context=context)
-  assert driver.start() == mesos.DRIVER_RUNNING
+  assert driver.start() == mesos_pb2.DRIVER_RUNNING
 
-  command_info = mesos.CommandInfo(value='wat')
-  framework_id = mesos.FrameworkID(value='fake_framework_id')
-  executor_id = mesos.ExecutorID(value='fake_executor_id')
-  executor_info = mesos.ExecutorInfo(
+  command_info = mesos_pb2.CommandInfo(value='wat')
+  framework_id = mesos_pb2.FrameworkID(value='fake_framework_id')
+  executor_id = mesos_pb2.ExecutorID(value='fake_executor_id')
+  executor_info = mesos_pb2.ExecutorInfo(
     executor_id=executor_id,
     framework_id=framework_id,
     command=command_info
   )
-  framework_info = mesos.FrameworkInfo(user='fake_user', name='fake_framework_name')
+  framework_info = mesos_pb2.FrameworkInfo(user='fake_user', name='fake_framework_name')
 
   slave.send_registered(
     driver.executor_process.pid,
@@ -80,11 +80,12 @@ def test_mesos_executor_register():
     framework_info
   )
 
-  driver.executor_process.connected.wait(timeout=1)
+  driver.executor_process.connected.wait()
   assert driver.executor_process.connected.is_set()
 
+  # TODO(wickman) race condition here
   executor.registered.assert_called_with(driver, executor_info, framework_info, slave.slave_info)
 
-  assert driver.stop() == mesos.DRIVER_STOPPED
+  assert driver.stop() == mesos_pb2.DRIVER_STOPPED
 
   context.stop()
