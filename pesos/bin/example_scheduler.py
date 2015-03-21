@@ -193,6 +193,7 @@ class Command(object):
 class ExampleScheduler(Scheduler):
   def __init__(self):
     self._pending_queue = []
+    self._waiting_queue = []
 
   def registered(self, driver, framework_id, master_info):
     print('registered: framework_id: %s, master_info: %s' % (framework_id, master_info))
@@ -220,6 +221,9 @@ class ExampleScheduler(Scheduler):
       task_info.task_id.value = '%s-%s' % (task.name, uuid.uuid4())
       task_info.slave_id.MergeFrom(offer.slave_id)
 
+      if task_info.HasField('executor'):
+        task_info.executor.executor_id.value = '%s-%s' % (task.name, uuid.uuid4())
+
       scheduled_tasks.append(task_info)
     return scheduled_tasks
 
@@ -242,11 +246,19 @@ class ExampleScheduler(Scheduler):
       else:
         pendingq.append(task)
 
-    driver.launch_tasks(all_offers, self._pending_to_scheduled(scheduleq))
+    task_infos = self._pending_to_scheduled(scheduleq)
+    for task_info in task_infos:
+      self._waiting_queue.append(task_info.task_id.value)
+    driver.launch_tasks(all_offers, task_infos)
+
     self._pending_queue = pendingq
 
   def status_update(self, driver, status):
     print('Got status update: %s' % status)
+    self._waiting_queue.remove(status.task_id.value)
+    if not self._waiting_queue:
+      print('Waiting queue is empty, stopping.')
+      driver.stop()
 
 
 def main(args):
@@ -264,7 +276,14 @@ def main(args):
   task = Task(
       'hello_world',
       Resources(1, 256, 256),
-      Command('echo hello world'),
+      # Command('echo hello world'),
+      Executor(
+          command=Command(
+              '/home/vagrant/pesos.pex /vagrant/pesos/bin/example_executor.py',
+              shell=True,
+          ),
+          resources=Resources(1, 256, 256),
+      ),
   )
 
   scheduler.add_pending(task)
