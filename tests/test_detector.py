@@ -1,6 +1,5 @@
 from pesos.detector import StandaloneMasterDetector
 
-import mock
 import threading
 
 

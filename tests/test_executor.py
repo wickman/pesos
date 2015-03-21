@@ -1,6 +1,5 @@
 import logging
 import os
-import time
 
 from pesos.executor import PesosExecutorDriver
 from pesos.testing import MockSlave

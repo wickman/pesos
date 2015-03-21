@@ -9,7 +9,7 @@ def test_camel():
 
 def test_camel_call():
   class CamelClass(object):
-    def camelCase(self, foo, bar=None):
+    def camelCase(self, foo, bar=None):  # noqa
       return foo, bar
 
     def snake_case(self, foo, bar=None):
@@ -20,4 +20,3 @@ def test_camel_call():
   assert camel_call(klazz, 'camel_case', 1) == (1, None)
   assert camel_call(klazz, 'snake_case', 2, bar=3) == (2, 3)
   assert camel_call(klazz, 'snake_case', 2) == (2, None)
-
