@@ -3,6 +3,7 @@ from getpass import getuser
 import functools
 import logging
 import threading
+import time
 import socket
 import sys
 
@@ -20,7 +21,7 @@ log = logging.getLogger(__name__)
 
 
 class SchedulerProcess(ProtobufProcess):
-  def __init__(self, driver, scheduler, framework, credential=None, detector=None):
+  def __init__(self, driver, scheduler, framework, credential=None, detector=None, clock=time):
     self.driver = driver
     self.scheduler = scheduler
     self.framework = framework
@@ -42,6 +43,9 @@ class SchedulerProcess(ProtobufProcess):
     # saved state
     self.saved_offers = defaultdict(dict)
     self.saved_slaves = {}
+
+    # clock
+    self.clock = clock
 
     super(SchedulerProcess, self).__init__(unique_suffix('scheduler'))
 
@@ -290,9 +294,9 @@ class SchedulerProcess(ProtobufProcess):
         if task.executor.framework_id.value != self.framework.id.value:
           self._local_lost(task, 'Malformed: Executor has an invalid framework ID')
           continue
-       if task.HasField('executor') and not task.executor.HasField('framework_id'):
-         # XXX we should not be mutating input
-         task.executor.framework_id.value = self.framework.id.value
+      if task.HasField('executor') and not task.executor.HasField('framework_id'):
+        # XXX we should not be mutating input
+        task.executor.framework_id.value = self.framework.id.value
 
     message = internal.LaunchTasksMessage(
         framework_id=self.framework.id,
