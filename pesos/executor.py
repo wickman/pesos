@@ -195,6 +195,8 @@ class ExecutorProcess(ProtobufProcess):
       log.info('Recovery timeout exceeded, shutting down.')
       self.shutdown(self.pid, None)
 
+  @Process.install('send_status_update')
+  @ignore_if_aborted
   def send_status_update(self, status):
     if status.state is mesos_pb2.TASK_STAGING:
       log.error('Executor is not allowed to send TASK_STAGING, aborting!')
@@ -224,6 +226,8 @@ class ExecutorProcess(ProtobufProcess):
     self.updates[update.uuid] = update
     self.send(self.slave, message)
 
+  @Process.install('send_framework_message')
+  @ignore_if_aborted
   def send_framework_message(self, data):
     message = internal.ExecutorToFrameworkMessage()
     message.slave_id.value = self.slave_id

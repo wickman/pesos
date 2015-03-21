@@ -17,7 +17,8 @@ class ExampleScheduler(Scheduler):
 
   def resource_offers(self, driver, offers):
     for offer in offers:
-      print('offer: %s' % offer)
+      print('declining offer: %s' % offer)
+      driver.decline_offer(offer.id.value)
 
 
 def main(args):

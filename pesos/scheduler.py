@@ -13,7 +13,7 @@ from .vendor.mesos.internal import messages_pb2 as internal
 
 from compactor.context import Context
 from compactor.pid import PID
-from compactor.process import ProtobufProcess
+from compactor.process import Process, ProtobufProcess
 from mesos.interface import SchedulerDriver
 
 log = logging.getLogger(__name__)
@@ -182,9 +182,8 @@ class SchedulerProcess(ProtobufProcess):
   def status_update(self, from_pid, message):
     if not self.valid_origin(from_pid):
       return
-    if message.pid:
-      sender_pid = PID.from_string(message.pid)
-      self.status_update_acknowledgement(message.update, sender_pid)
+    if self.master:
+      self.status_update_acknowledgement(message.update, self.master)
     with timed(log.debug, 'scheduler::status_update'):
       camel_call(self.scheduler, 'status_update', self.driver, message.update.status)
 
@@ -205,7 +204,7 @@ class SchedulerProcess(ProtobufProcess):
     assert self.master is not None
     if not self.valid_origin(from_pid):
       return
-    self.slave_pids.pop(message.slave_id)
+    self.saved_slaves.pop(message.slave_id.value)
     with timed(log.debug, 'scheduler::slave_lost'):
       camel_call(self.scheduler, 'slave_lost', self.driver, message.slave_id)
 
@@ -235,17 +234,20 @@ class SchedulerProcess(ProtobufProcess):
           framework_id=self.framework.id
       ))
 
+  @Process.install('abort')
   @ignore_if_aborted
   def abort(self):
     self.connected.clear()
     self.aborted.set()
 
+  @Process.install('kill_task')
   @ignore_if_disconnected
   def kill_task(self, task_id):
     assert self.master is not None
     message = internal.KillTaskMessage(framework_id=self.framework.id, task_id=task_id)
     self.send(self.master, message)
 
+  @Process.install('request_resources')
   @ignore_if_disconnected
   def request_resources(self, requests):
     assert self.master is not None
@@ -255,44 +257,42 @@ class SchedulerProcess(ProtobufProcess):
     )
     self.send(self.master, message)
 
+  def _local_lost(self, task, reason):
+    update = mesos_pb2.StatusUpdate(
+        framework_id=self.framework.id,
+        status=mesos.TaskStatus(
+            task_id=task.id,
+            state=mesos.TASK_LOST,
+            message=reason,
+            timestamp=now,
+            uuid=uuid.uuid4().get_bytes(),
+        )
+    )
+    self.send(self.pid, update)
+
+  @Process.install('launch_tasks')
   def launch_tasks(self, offer_ids, tasks, filters=None):
-    # TODO(tarnfeld): Implement this, we need to tell the framework that the
-    # tasks were lost.
-    def task_lost(task):
-      pass
+    now = self.clock.time()
 
-    if not isinstance(offer_ids, list):
-      offer_ids = [offer_ids]
+    if not self.connected.is_set():
+      for task in tasks:
+        self._local_lost(task, 'Master Disconnected')
+      return
 
-    assert len(offer_ids) > 0
-
-    if filters is None:
-      filters = mesos_pb2.Filters()
-
-    lost_tasks = False
+    filters = filters or mesos_pb2.Filters()
 
     # Perform some sanity checking on the tasks before launching them
     for task in tasks:
-      if not self.connected.is_set():
-        task_lost(task)
-        lost_tasks = True
-        continue
       if task.HasField('executor') == task.HasField('command'):
-        log.error('A task must have either an executor or command')
-        task_lost(task)
-        lost_tasks = True
+        self._local_lost(task, 'Malformed: A task must have either an executor or command')
         continue
-      if task.HasField('executor') and task.executor.HasField('framework_id') \
-         and task.executor.framework_id.value != self.framework.id.value:
-        log.error('Executor has an invalid framework ID')
-        task_lost(task)
-        lost_tasks = True
-        continue
-      if task.HasField('executor') and not task.executor.HasField('framework_id'):
-        task.executor.framework_id.value = self.framework.id.value
-
-    if lost_tasks:
-      return
+      if task.HasField('executor') and task.executor.HasField('framework_id'):
+        if task.executor.framework_id.value != self.framework.id.value:
+          self._local_lost(task, 'Malformed: Executor has an invalid framework ID')
+          continue
+       if task.HasField('executor') and not task.executor.HasField('framework_id'):
+         # XXX we should not be mutating input
+         task.executor.framework_id.value = self.framework.id.value
 
     message = internal.LaunchTasksMessage(
         framework_id=self.framework.id,
@@ -302,16 +302,18 @@ class SchedulerProcess(ProtobufProcess):
 
     for offer_id in offer_ids:
       field = message.offer_ids.add()
-      field.value = offer_id.value
+      field.value = offer_id
 
     self.send(self.master, message)
 
+  @Process.install('revive_offers')
   @ignore_if_disconnected
   def revive_offers(self):
     assert self.master is not None
     message = internal.ReviveOffersMessage(framework_id=self.framework.id)
     self.send(self.master, message)
 
+  @Process.install('send_framework_message')
   @ignore_if_disconnected
   def send_framework_message(self, executor_id, slave_id, data):
     assert executor_id is not None
@@ -325,6 +327,7 @@ class SchedulerProcess(ProtobufProcess):
     )
     self.send(self.master, message)
 
+  @Process.install('reconcile_tasks')
   @ignore_if_disconnected
   def reconcile_tasks(self, statuses):
     assert self.master is not None
@@ -447,7 +450,7 @@ class PesosSchedulerDriver(SchedulerDriver):
 
   @locked
   def declineOffer(self, offer_id, filters=None):
-    return self.launch_tasks(offer_id, [], filters)
+    return self.launch_tasks([offer_id], [], filters)
 
   @locked
   def reviveOffers(self):
