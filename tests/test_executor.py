@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 
 from pesos.executor import PesosExecutorDriver
 from pesos.testing import MockSlave
@@ -56,8 +57,15 @@ def test_mesos_executor_register():
 
   os.environ['MESOS_SLAVE_PID'] = str(slave.pid)
 
-  executor = mock.MagicMock()
-  executor.registered = mock.MagicMock()
+  event = threading.Event()
+  registered_call = mock.Mock()
+
+  def side_effect_event(*args, **kw):
+    registered_call(*args, **kw)
+    event.set()
+
+  executor = mock.create_autospec(Executor, spec_set=True)
+  executor.registered = mock.Mock(side_effect=side_effect_event)
 
   driver = PesosExecutorDriver(executor, context=context)
   assert driver.start() == mesos_pb2.DRIVER_RUNNING
@@ -66,24 +74,24 @@ def test_mesos_executor_register():
   framework_id = mesos_pb2.FrameworkID(value='fake_framework_id')
   executor_id = mesos_pb2.ExecutorID(value='fake_executor_id')
   executor_info = mesos_pb2.ExecutorInfo(
-    executor_id=executor_id,
-    framework_id=framework_id,
-    command=command_info
+      executor_id=executor_id,
+      framework_id=framework_id,
+      command=command_info
   )
   framework_info = mesos_pb2.FrameworkInfo(user='fake_user', name='fake_framework_name')
 
   slave.send_registered(
-    driver.executor_process.pid,
-    executor_info,
-    framework_id,
-    framework_info
+      driver.executor_process.pid,
+      executor_info,
+      framework_id,
+      framework_info
   )
 
   driver.executor_process.connected.wait()
   assert driver.executor_process.connected.is_set()
 
-  # TODO(wickman) race condition here
-  executor.registered.assert_called_with(driver, executor_info, framework_info, slave.slave_info)
+  event.wait()
+  registered_call.assert_called_with(driver, executor_info, framework_info, slave.slave_info)
 
   assert driver.stop() == mesos_pb2.DRIVER_STOPPED
 
