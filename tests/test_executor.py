@@ -164,3 +164,48 @@ class TestExecutor(unittest.TestCase):
     assert reregistered_event.is_set()
 
     assert reregistered_call.mock_calls == [mock.call(driver, self.slave.slave_info)]
+
+  def test_mesos_executor_run_task(self):
+    os.environ['MESOS_SLAVE_PID'] = str(self.slave.pid)
+
+    launch_task_event = threading.Event()
+    launch_task_call = mock.Mock()
+
+    def launch_task_side_effect(*args, **kw):
+      launch_task_call(*args, **kw)
+      launch_task_event.set()
+
+    executor = mock.create_autospec(Executor, spec_set=True)
+    executor.launchTask = mock.Mock(side_effect=launch_task_side_effect)
+
+    driver_context = Context()
+    driver_context.start()
+    driver = PesosExecutorDriver(executor, context=driver_context)
+    assert driver.start() == mesos_pb2.DRIVER_RUNNING
+
+    # wait until registered
+    driver.executor_process.connected.wait()
+
+    # now launch task
+    task_info = mesos_pb2.TaskInfo(
+        name='task',
+        task_id=mesos_pb2.TaskID(value='task-id'),
+        slave_id=self.slave.slave_id,
+        executor=self.executor_info,
+    )
+    self.slave.send_run_task(
+        driver.executor_process.pid,
+        mesos_pb2.FrameworkID(value=self.FRAMEWORK_ID),
+        task_info,
+    )
+
+    launch_task_event.wait()
+    assert launch_task_call.mock_calls == [mock.call(driver, task_info)]
+    assert driver.executor_process.tasks == {task_info.task_id.value: task_info}
+
+  def test_mesos_executor_kill_task(self):
+    pass
+
+  def test_mesos_executor_framework_message_delivery(self):
+    pass
+

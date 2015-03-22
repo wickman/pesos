@@ -111,10 +111,8 @@ class ExecutorProcess(ProtobufProcess):
         executor_id=mesos_pb2.ExecutorID(value=self.executor_id),
         framework_id=mesos_pb2.FrameworkID(value=self.framework_id),
     )
-    for update in self.updates.values():
-      reregister_message.updates.add().MergeFrom(update)
-    for task in self.tasks.values():
-      reregister_message.tasks.add().MergeFrom(update)
+    reregister_message.updates.extend(self.updates.values())
+    reregister_message.tasks.extend(self.tasks.values())
     self.send(self.slave, reregister_message)
 
   @ProtobufProcess.install(internal.RunTaskMessage)

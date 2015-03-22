@@ -6,6 +6,7 @@ from .util import unique_suffix
 from .vendor.mesos import mesos_pb2 as mesos
 from .vendor.mesos.internal import messages_pb2 as internal
 
+from compactor.pid import PID
 from compactor.process import ProtobufProcess
 
 
@@ -74,12 +75,13 @@ class MockSlave(ProtobufProcess):
     message = internal.ReconnectExecutorMessage(slave_id=self.slave_id)
     self.send(to, message)
 
-  def send_run_task(self, to, framework_pid, framework_id, framework_info, task):
+  def send_run_task(self, to, framework_id, task):
     message = internal.RunTaskMessage(
         framework_id=framework_id,
-        framework_info=framework_info,
+        framework=self._framework_map[framework_id.value],
         task=task,
-        pid=framework_pid
+        # this appears to be no longer used though it is a required field.
+        pid=str(PID('127.0.0.1', 31337, 'not_used(123)')),
     )
     self.send(to, message)
 
