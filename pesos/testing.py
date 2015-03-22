@@ -19,11 +19,11 @@ def fake_slave_info(**kw):
 
 
 class MockSlave(ProtobufProcess):
-  def __init__(self, executor_map, framework_map):
+  def __init__(self, slave_id, executor_map, framework_map):
     self._executor_map = executor_map   # executor_id => executor_info
     self._framework_map = framework_map   # framework_id => framework_info
 
-    self.slave_id = mesos.SlaveID(value=fake_id('slave-'))
+    self.slave_id = slave_id
     self.slave_info = fake_slave_info()
     self.reregister_event = threading.Event()
     self.register_event = threading.Event()
@@ -48,11 +48,13 @@ class MockSlave(ProtobufProcess):
 
   @ProtobufProcess.install(internal.StatusUpdateMessage)
   def recv_status_update(self, from_pid, message):
-    pass
+    self.status_updates.append((from_pid, message))
+    self.status_update_event.set()
 
   @ProtobufProcess.install(internal.ExecutorToFrameworkMessage)
   def recv_framework_message(self, from_pid, message):
-    pass
+    self.framework_messages.append((from_pid, message))
+    self.framework_message_event.set()
 
   def send_registered(self, to, executor_info, framework_id, framework_info):
     message = internal.ExecutorRegisteredMessage(

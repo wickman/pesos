@@ -218,9 +218,9 @@ class ExecutorProcess(ProtobufProcess):
       return
 
     update = internal.StatusUpdate(
-      status=status,
-      timestamp=time.time(),
-      uuid=uuid.uuid4().get_bytes()
+        status=status,
+        timestamp=time.time(),
+        uuid=uuid.uuid4().get_bytes(),
     )
 
     update.framework_id.value = self.framework_id
@@ -230,8 +230,8 @@ class ExecutorProcess(ProtobufProcess):
     update.status.slave_id.value = self.slave_id
 
     message = internal.StatusUpdateMessage(
-      update=update,
-      pid=str(self.pid)
+        update=update,
+        pid=str(self.pid)
     )
 
     self.updates[update.uuid] = update
@@ -268,6 +268,7 @@ class PesosExecutorDriver(ExecutorDriver):
     self.executor = executor
     self.executor_process = None
     self.executor_pid = None
+    self.started = threading.Event()
     self.status = mesos_pb2.DRIVER_NOT_STARTED
     self.lock = threading.Condition()
 
@@ -315,6 +316,7 @@ class PesosExecutorDriver(ExecutorDriver):
     log.info("Started driver")
 
     self.status = mesos_pb2.DRIVER_RUNNING
+    self.started.set()
     return self.status
 
   @locked
