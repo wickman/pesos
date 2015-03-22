@@ -2,9 +2,11 @@
 CHANGES
 =======
 
-----------
-0.2.0-dev0
-----------
+-----
+0.2.0
+-----
+
+* Improved executor test coverage.
 
 * Vagrant image added for integration testing
 

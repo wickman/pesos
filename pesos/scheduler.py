@@ -229,7 +229,6 @@ class SchedulerProcess(ProtobufProcess):
     with timed(log.debug, 'scheduler::error'):
       camel_call(self.scheduler, 'error', self.driver, message.message)
 
-  @Process.install('stop')
   @ignore_if_aborted
   def stop(self, failover=False):
     if not failover:
@@ -239,20 +238,17 @@ class SchedulerProcess(ProtobufProcess):
           framework_id=self.framework.id
       ))
 
-  @Process.install('abort')
   @ignore_if_aborted
   def abort(self):
     self.connected.clear()
     self.aborted.set()
 
-  @Process.install('kill_task')
   @ignore_if_disconnected
   def kill_task(self, task_id):
     assert self.master is not None
     message = internal.KillTaskMessage(framework_id=self.framework.id, task_id=task_id)
     self.send(self.master, message)
 
-  @Process.install('request_resources')
   @ignore_if_disconnected
   def request_resources(self, requests):
     assert self.master is not None
@@ -275,7 +271,6 @@ class SchedulerProcess(ProtobufProcess):
     )
     self.send(self.pid, update)
 
-  @Process.install('launch_tasks')
   def launch_tasks(self, offer_ids, tasks, filters=None):
     now = self.clock.time()
 
@@ -311,14 +306,12 @@ class SchedulerProcess(ProtobufProcess):
 
     self.send(self.master, message)
 
-  @Process.install('revive_offers')
   @ignore_if_disconnected
   def revive_offers(self):
     assert self.master is not None
     message = internal.ReviveOffersMessage(framework_id=self.framework.id)
     self.send(self.master, message)
 
-  @Process.install('send_framework_message')
   @ignore_if_disconnected
   def send_framework_message(self, executor_id, slave_id, data):
     assert executor_id is not None
@@ -332,7 +325,6 @@ class SchedulerProcess(ProtobufProcess):
     )
     self.send(self.master, message)
 
-  @Process.install('reconcile_tasks')
   @ignore_if_disconnected
   def reconcile_tasks(self, statuses):
     assert self.master is not None

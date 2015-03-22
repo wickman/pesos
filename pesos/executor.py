@@ -22,8 +22,16 @@ class ExecutorProcess(ProtobufProcess):
   class Error(Exception):
     pass
 
-  def __init__(self, slave_pid, driver, executor, slave_id, framework_id, executor_id,
-               directory, checkpoint, recovery_timeout):
+  def __init__(self,
+               slave_pid,
+               driver,
+               executor,
+               slave_id,
+               framework_id,
+               executor_id,
+               directory,
+               checkpoint,
+               recovery_timeout):
 
     self.slave = slave_pid
     self.driver = driver
@@ -57,6 +65,8 @@ class ExecutorProcess(ProtobufProcess):
 
   def initialize(self):
     super(ExecutorProcess, self).initialize()
+
+    self.link(self.slave)
 
     log.info('Registering executor with slave %s' % self.slave)
     message = internal.RegisterExecutorMessage()
@@ -97,11 +107,12 @@ class ExecutorProcess(ProtobufProcess):
     self.slave = from_pid
     self.link(from_pid)
 
-    reregister_message = internal.ReregisterExecutorMessage()
-    reregister_message.executor_id = self.executor_id
-    reregister_message.framework_id = self.framework_id
-    reregister_message.updates = list(self.updates.values())
-    reregister_message.tasks = list(self.tasks.values())
+    reregister_message = internal.ReregisterExecutorMessage(
+        executor_id=mesos_pb2.ExecutorID(value=self.executor_id),
+        framework_id=mesos_pb2.FrameworkID(value=self.framework_id),
+    )
+    reregister_message.updates.extend(self.updates.values())
+    reregister_message.tasks.extend(self.tasks.values())
     self.send(self.slave, reregister_message)
 
   @ProtobufProcess.install(internal.RunTaskMessage)
@@ -159,14 +170,12 @@ class ExecutorProcess(ProtobufProcess):
 
     self.stop()
 
-  @Process.install('stop')
   @ignore_if_aborted
   def stop(self):
     self.stopped.set()
     self.terminate()
     # Shutdown?
 
-  @Process.install('abort')
   @ignore_if_aborted
   def abort(self):
     self.connected.clear()
@@ -181,11 +190,7 @@ class ExecutorProcess(ProtobufProcess):
       self.context.delay(self.recovery_timeout, self.pid, '_recovery_timeout', self.connection)
       return
 
-    with timed(log.debug, 'executor::shutdown'):
-      camel_call(self.executor, 'shutdown', self.driver)
-
-    log.info('Slave exited. Aborting.')
-    self.abort()
+    self._abort()
 
   def _recovery_timeout(self, connection):
     if self.connected.is_set():
@@ -193,9 +198,15 @@ class ExecutorProcess(ProtobufProcess):
 
     if self.connection == connection:
       log.info('Recovery timeout exceeded, shutting down.')
-      self.shutdown(self.pid, None)
+      self._abort()
 
-  @Process.install('send_status_update')
+  def _abort(self):
+    with timed(log.debug, 'executor::shutdown'):
+      camel_call(self.executor, 'shutdown', self.driver)
+
+    log.info('Slave exited. Aborting.')
+    self.abort()
+
   @ignore_if_aborted
   def send_status_update(self, status):
     if status.state is mesos_pb2.TASK_STAGING:
@@ -207,9 +218,9 @@ class ExecutorProcess(ProtobufProcess):
       return
 
     update = internal.StatusUpdate(
-      status=status,
-      timestamp=time.time(),
-      uuid=uuid.uuid4().get_bytes()
+        status=status,
+        timestamp=time.time(),
+        uuid=uuid.uuid4().get_bytes(),
     )
 
     update.framework_id.value = self.framework_id
@@ -219,14 +230,13 @@ class ExecutorProcess(ProtobufProcess):
     update.status.slave_id.value = self.slave_id
 
     message = internal.StatusUpdateMessage(
-      update=update,
-      pid=str(self.pid)
+        update=update,
+        pid=str(self.pid)
     )
 
     self.updates[update.uuid] = update
     self.send(self.slave, message)
 
-  @Process.install('send_framework_message')
   @ignore_if_aborted
   def send_framework_message(self, data):
     message = internal.ExecutorToFrameworkMessage()
@@ -258,6 +268,7 @@ class PesosExecutorDriver(ExecutorDriver):
     self.executor = executor
     self.executor_process = None
     self.executor_pid = None
+    self.started = threading.Event()
     self.status = mesos_pb2.DRIVER_NOT_STARTED
     self.lock = threading.Condition()
 
@@ -305,6 +316,7 @@ class PesosExecutorDriver(ExecutorDriver):
     log.info("Started driver")
 
     self.status = mesos_pb2.DRIVER_RUNNING
+    self.started.set()
     return self.status
 
   @locked
