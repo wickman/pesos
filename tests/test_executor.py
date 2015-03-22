@@ -1,6 +1,10 @@
+from __future__ import print_function
+
 import logging
 import os
+import sys
 import threading
+import unittest
 
 from pesos.executor import PesosExecutorDriver
 from pesos.testing import MockSlave
@@ -14,7 +18,8 @@ try:
 except ImportError:
   import mock
 
-logging.basicConfig(level=logging.DEBUG)
+FORMAT = "%(levelname)s:%(asctime)s.%(msecs)03d %(threadName)s %(message)s"
+logging.basicConfig(format=FORMAT, level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S')
 
 
 FAKE_ENVIRONMENT = {
@@ -27,72 +32,171 @@ FAKE_ENVIRONMENT = {
 
 
 @mock.patch.dict('os.environ', FAKE_ENVIRONMENT)
-def test_mesos_executor_driver_init():
-  context = Context()
-  context.start()
+class TestExecutor(unittest.TestCase):
+  def setUp(self):
+    self.context = Context()
+    self.context.start()
+    self.slave = MockSlave()
+    self.context.spawn(self.slave)
 
-  # spawn slave
-  slave = MockSlave()
-  context.spawn(slave)
+  def tearDown(self):
+    self.context.stop()
 
-  os.environ['MESOS_SLAVE_PID'] = str(slave.pid)
+  def fake_registration(self):
+    command_info = mesos_pb2.CommandInfo(value='wat')
+    framework_id = mesos_pb2.FrameworkID(value='fake_framework_id')
+    executor_id = mesos_pb2.ExecutorID(value='fake_executor_id')
+    executor_info = mesos_pb2.ExecutorInfo(
+        executor_id=executor_id,
+        framework_id=framework_id,
+        command=command_info,
+    )
+    framework_info = mesos_pb2.FrameworkInfo(user='fake_user', name='fake_framework_name')
+    return executor_info, framework_id, framework_info
 
-  executor = Executor()
-  driver = PesosExecutorDriver(executor, context=context)
-  assert driver.start() == mesos_pb2.DRIVER_RUNNING
-  assert driver.stop() == mesos_pb2.DRIVER_STOPPED
-  assert driver.join() == mesos_pb2.DRIVER_STOPPED
+  def test_mesos_executor_driver_init(self):
+    os.environ['MESOS_SLAVE_PID'] = str(self.slave.pid)
 
-  context.stop()
+    executor = Executor()
+    driver = PesosExecutorDriver(executor, context=self.context)
+    assert driver.start() == mesos_pb2.DRIVER_RUNNING
+    assert driver.stop() == mesos_pb2.DRIVER_STOPPED
+    assert driver.join() == mesos_pb2.DRIVER_STOPPED
 
+  def test_mesos_executor_register(self):
+    os.environ['MESOS_SLAVE_PID'] = str(self.slave.pid)
 
-@mock.patch.dict('os.environ', FAKE_ENVIRONMENT)
-def test_mesos_executor_register():
-  context = Context()
-  context.start()
+    event = threading.Event()
+    registered_call = mock.Mock()
 
-  # spawn slave
-  slave = MockSlave()
-  context.spawn(slave)
+    def side_effect_event(*args, **kw):
+      registered_call(*args, **kw)
+      event.set()
 
-  os.environ['MESOS_SLAVE_PID'] = str(slave.pid)
+    executor = mock.create_autospec(Executor, spec_set=True)
+    executor.registered = mock.Mock(side_effect=side_effect_event)
 
-  event = threading.Event()
-  registered_call = mock.Mock()
+    driver = PesosExecutorDriver(executor, context=self.context)
+    assert driver.start() == mesos_pb2.DRIVER_RUNNING
 
-  def side_effect_event(*args, **kw):
-    registered_call(*args, **kw)
-    event.set()
+    executor_info, framework_id, framework_info = self.fake_registration()
 
-  executor = mock.create_autospec(Executor, spec_set=True)
-  executor.registered = mock.Mock(side_effect=side_effect_event)
+    self.slave.send_registered(
+        driver.executor_process.pid,
+        executor_info,
+        framework_id,
+        framework_info
+    )
 
-  driver = PesosExecutorDriver(executor, context=context)
-  assert driver.start() == mesos_pb2.DRIVER_RUNNING
+    driver.executor_process.connected.wait()
+    assert driver.executor_process.connected.is_set()
 
-  command_info = mesos_pb2.CommandInfo(value='wat')
-  framework_id = mesos_pb2.FrameworkID(value='fake_framework_id')
-  executor_id = mesos_pb2.ExecutorID(value='fake_executor_id')
-  executor_info = mesos_pb2.ExecutorInfo(
-      executor_id=executor_id,
-      framework_id=framework_id,
-      command=command_info
-  )
-  framework_info = mesos_pb2.FrameworkInfo(user='fake_user', name='fake_framework_name')
+    event.wait()
+    assert registered_call.mock_calls == [
+        mock.call(driver, executor_info, framework_info, self.slave.slave_info)]
 
-  slave.send_registered(
-      driver.executor_process.pid,
-      executor_info,
-      framework_id,
-      framework_info
-  )
+    assert driver.stop() == mesos_pb2.DRIVER_STOPPED
 
-  driver.executor_process.connected.wait()
-  assert driver.executor_process.connected.is_set()
+  def test_mesos_executor_abort_on_disconnection(self):
+    os.environ['MESOS_SLAVE_PID'] = str(self.slave.pid)
 
-  event.wait()
-  registered_call.assert_called_with(driver, executor_info, framework_info, slave.slave_info)
+    event = threading.Event()
+    shutdown_call = mock.Mock()
+    registered_call = mock.Mock()
 
-  assert driver.stop() == mesos_pb2.DRIVER_STOPPED
+    def shutdown_side_effect(*args, **kw):
+      shutdown_call(*args, **kw)
+      event.set()
 
-  context.stop()
+    def registered_side_effect(*args, **kw):
+      registered_call(*args, **kw)
+      event.set()
+
+    executor = mock.create_autospec(Executor, spec_set=True)
+    executor.registered = mock.Mock(side_effect=registered_side_effect)
+    executor.shutdown = mock.Mock(side_effect=shutdown_side_effect)
+
+    driver_context = Context()
+    driver_context.start()
+    driver = PesosExecutorDriver(executor, context=driver_context)
+    assert driver.start() == mesos_pb2.DRIVER_RUNNING
+
+    executor_info, framework_id, framework_info = self.fake_registration()
+
+    self.slave.send_registered(
+        driver.executor_process.pid,
+        executor_info,
+        framework_id,
+        framework_info
+    )
+
+    driver.executor_process.connected.wait()
+    assert driver.executor_process.connected.is_set()
+
+    # registered event
+    event.wait()
+    assert event.is_set()
+    event.clear()
+
+    conn = driver_context._connections[self.slave.pid]
+    conn.close()
+
+    # abort event
+    event.wait()
+    assert event.is_set()
+
+    assert shutdown_call.mock_calls == [mock.call(driver)]
+
+  def test_mesos_executor_reregister(self):
+    os.environ['MESOS_SLAVE_PID'] = str(self.slave.pid)
+    os.environ['MESOS_CHECKPOINT'] = '1'
+    os.environ['MESOS_RECOVERY_TIMEOUT'] = '60'
+
+    event = threading.Event()
+    reregistered_call = mock.Mock()
+    registered_call = mock.Mock()
+
+    def reregistered_side_effect(*args, **kw):
+      reregistered_call(*args, **kw)
+      event.set()
+
+    def registered_side_effect(*args, **kw):
+      registered_call(*args, **kw)
+      event.set()
+
+    executor = mock.create_autospec(Executor, spec_set=True)
+    executor.registered = mock.Mock(side_effect=registered_side_effect)
+    executor.reregistered = mock.Mock(side_effect=reregistered_side_effect)
+
+    driver_context = Context()
+    driver_context.start()
+    driver = PesosExecutorDriver(executor, context=driver_context)
+    assert driver.start() == mesos_pb2.DRIVER_RUNNING
+
+    executor_info, framework_id, framework_info = self.fake_registration()
+
+    self.slave.send_registered(
+        driver.executor_process.pid,
+        executor_info,
+        framework_id,
+        framework_info
+    )
+
+    driver.executor_process.connected.wait()
+    assert driver.executor_process.connected.is_set()
+
+    # registered event
+    event.wait()
+    assert event.is_set()
+    event.clear()
+
+    conn = driver_context._connections[self.slave.pid]
+    conn.close()
+
+    self.slave.send_reregistered(driver.executor_process.pid)
+
+    # reregistered event
+    event.wait()
+    assert event.is_set()
+
+    assert reregistered_call.mock_calls == [mock.call(driver, self.slave.slave_info)]

@@ -32,8 +32,12 @@ class MockSlave(ProtobufProcess):
     )
     self.send(to, message)
 
-  def send_reregistered(self):
-    pass
+  def send_reregistered(self, to):
+    message = internal.ExecutorReregisteredMessage(
+        slave_id=self.slave_id,
+        slave_info=self.slave_info,
+    )
+    self.send(to, message)
 
   def send_reconnect(self):
     pass

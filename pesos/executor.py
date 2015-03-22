@@ -58,6 +58,8 @@ class ExecutorProcess(ProtobufProcess):
   def initialize(self):
     super(ExecutorProcess, self).initialize()
 
+    self.link(self.slave)
+
     log.info('Registering executor with slave %s' % self.slave)
     message = internal.RegisterExecutorMessage()
     message.framework_id.value = self.framework_id
@@ -159,14 +161,12 @@ class ExecutorProcess(ProtobufProcess):
 
     self.stop()
 
-  @Process.install('stop')
   @ignore_if_aborted
   def stop(self):
     self.stopped.set()
     self.terminate()
     # Shutdown?
 
-  @Process.install('abort')
   @ignore_if_aborted
   def abort(self):
     self.connected.clear()
@@ -195,7 +195,6 @@ class ExecutorProcess(ProtobufProcess):
       log.info('Recovery timeout exceeded, shutting down.')
       self.shutdown(self.pid, None)
 
-  @Process.install('send_status_update')
   @ignore_if_aborted
   def send_status_update(self, status):
     if status.state is mesos_pb2.TASK_STAGING:
@@ -226,7 +225,6 @@ class ExecutorProcess(ProtobufProcess):
     self.updates[update.uuid] = update
     self.send(self.slave, message)
 
-  @Process.install('send_framework_message')
   @ignore_if_aborted
   def send_framework_message(self, data):
     message = internal.ExecutorToFrameworkMessage()
