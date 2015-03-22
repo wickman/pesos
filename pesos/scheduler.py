@@ -229,6 +229,7 @@ class SchedulerProcess(ProtobufProcess):
     with timed(log.debug, 'scheduler::error'):
       camel_call(self.scheduler, 'error', self.driver, message.message)
 
+  @Process.install('stop')
   @ignore_if_aborted
   def stop(self, failover=False):
     if not failover:

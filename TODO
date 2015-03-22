@@ -1,2 +1,6 @@
 * Implement acceptOffers API
 * Implement implicit acknowledgement
+* Implement executorLost
+* Implement zookeeper master detection
+* Implement authentication
+* Implement reliable registration

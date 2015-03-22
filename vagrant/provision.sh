@@ -11,6 +11,7 @@ apt-get -y install \
     lxc-docker \
     openjdk-7-jdk \
     python-dev \
+    python-pip \
     zookeeper
 
 # Set the hostname to the IP address.  This simplifies things for components
@@ -36,7 +37,7 @@ Host $(hostname)
 EOF
 }
 
-function prepare_extras {
+function prepare_services {
   # Install the upstart configurations.
   cp /vagrant/vagrant/upstart/*.conf /etc/init
 }
@@ -47,7 +48,12 @@ function start_services {
   start mesos-slave || true
 }
 
+function prepare_python {
+  pip install wheel
+}
+
 install_ssh_config
 install_mesos
-prepare_extras
+prepare_services
+prepare_python
 start_services
