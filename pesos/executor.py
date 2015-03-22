@@ -22,8 +22,16 @@ class ExecutorProcess(ProtobufProcess):
   class Error(Exception):
     pass
 
-  def __init__(self, slave_pid, driver, executor, slave_id, framework_id, executor_id,
-               directory, checkpoint, recovery_timeout):
+  def __init__(self,
+               slave_pid,
+               driver,
+               executor,
+               slave_id,
+               framework_id,
+               executor_id,
+               directory,
+               checkpoint,
+               recovery_timeout):
 
     self.slave = slave_pid
     self.driver = driver
@@ -99,11 +107,14 @@ class ExecutorProcess(ProtobufProcess):
     self.slave = from_pid
     self.link(from_pid)
 
-    reregister_message = internal.ReregisterExecutorMessage()
-    reregister_message.executor_id = self.executor_id
-    reregister_message.framework_id = self.framework_id
-    reregister_message.updates = list(self.updates.values())
-    reregister_message.tasks = list(self.tasks.values())
+    reregister_message = internal.ReregisterExecutorMessage(
+        executor_id=mesos_pb2.ExecutorID(value=self.executor_id),
+        framework_id=mesos_pb2.FrameworkID(value=self.framework_id),
+    )
+    for update in self.updates.values():
+      reregister_message.updates.add().MergeFrom(update)
+    for task in self.tasks.values():
+      reregister_message.tasks.add().MergeFrom(update)
     self.send(self.slave, reregister_message)
 
   @ProtobufProcess.install(internal.RunTaskMessage)
@@ -181,11 +192,7 @@ class ExecutorProcess(ProtobufProcess):
       self.context.delay(self.recovery_timeout, self.pid, '_recovery_timeout', self.connection)
       return
 
-    with timed(log.debug, 'executor::shutdown'):
-      camel_call(self.executor, 'shutdown', self.driver)
-
-    log.info('Slave exited. Aborting.')
-    self.abort()
+    self._abort()
 
   def _recovery_timeout(self, connection):
     if self.connected.is_set():
@@ -193,7 +200,14 @@ class ExecutorProcess(ProtobufProcess):
 
     if self.connection == connection:
       log.info('Recovery timeout exceeded, shutting down.')
-      self.shutdown(self.pid, None)
+      self._abort()
+
+  def _abort(self):
+    with timed(log.debug, 'executor::shutdown'):
+      camel_call(self.executor, 'shutdown', self.driver)
+
+    log.info('Slave exited. Aborting.')
+    self.abort()
 
   @ignore_if_aborted
   def send_status_update(self, status):
