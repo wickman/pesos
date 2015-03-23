@@ -45,3 +45,31 @@ def camel_call(instance, method, *args, **kw):
   instance_method = getattr(instance, camel(method))
   if instance_method:
     return instance_method(*args, **kw)
+
+
+_DURATION_MULTIPLIERS = (
+    ('weeks', 60*60*24*7),
+    ('days', 60*60*24),
+    ('hrs', 60*60),
+    ('mins', 60),
+    ('secs', 10**0),
+    ('ms', 10**-3),
+    ('us', 10**-6),
+    ('ns', 10**-9),
+)
+
+
+def duration_to_seconds(duration):
+  if not isinstance(duration, (bytes, str)):
+    raise ValueError('Duration must be a string, got %s' % type(duration))
+
+  duration = duration.strip()
+
+  try:
+    for suffix, multiplier in _DURATION_MULTIPLIERS:
+      if duration.endswith(suffix):
+        return float(duration[:-len(suffix)]) * multiplier
+    else:
+      return float(duration)
+  except ValueError:
+    raise ValueError('Invalid duration: %s' % duration)

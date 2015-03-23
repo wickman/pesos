@@ -7,7 +7,7 @@ import uuid
 
 from .vendor.mesos import mesos_pb2
 from .vendor.mesos.internal import messages_pb2 as internal
-from .util import camel_call, timed, unique_suffix
+from .util import camel_call, duration_to_seconds, timed, unique_suffix
 
 from compactor.context import Context
 from compactor.pid import PID
@@ -289,14 +289,8 @@ class PesosExecutorDriver(ExecutorDriver):
     executor_id = self.get_env('MESOS_EXECUTOR_ID')
     directory = self.get_env('MESOS_DIRECTORY')
     checkpoint = self.get_bool('MESOS_CHECKPOINT')
-    recovery_timeout_secs = 15 * 60  # 15 minutes
-
-    if checkpoint:
-      # TODO(wickman) Implement Duration. Instead take seconds for now
-      try:
-        recovery_timeout_secs = int(self.get_env('MESOS_RECOVERY_TIMEOUT'))
-      except ValueError:
-        raise RuntimeError('MESOS_RECOVERY_TIMEOUT must be in seconds.')
+    recovery_timeout_secs = duration_to_seconds(
+        os.environ.get('MESOS_RECOVERY_TIMEOUT', '15mins'))
 
     assert self.executor_process is None
     self.executor_process = ExecutorProcess(

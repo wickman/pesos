@@ -3,6 +3,13 @@ CHANGES
 =======
 
 -----
+0.2.1
+-----
+
+* Add stout's ``Duration`` support to pesos so that it works correctly with
+  slave checkpointing.
+
+-----
 0.2.0
 -----
 

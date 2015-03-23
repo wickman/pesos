@@ -123,7 +123,7 @@ class TestExecutor(unittest.TestCase):
   def test_mesos_executor_reregister(self):
     os.environ['MESOS_SLAVE_PID'] = str(self.slave.pid)
     os.environ['MESOS_CHECKPOINT'] = '1'
-    os.environ['MESOS_RECOVERY_TIMEOUT'] = '60'
+    os.environ['MESOS_RECOVERY_TIMEOUT'] = '15mins'
 
     reregistered_event, reregistered_call, reregistered_side_effect = self.mock_method()
     executor = mock.create_autospec(Executor, spec_set=True)
