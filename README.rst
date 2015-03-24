@@ -1,5 +1,7 @@
 pesos
 =====
+.. image:: https://travis-ci.org/wickman/pesos.svg?branch=master
+    :target: https://travis-ci.org/wickman/pesos
 
 pesos is a pure python implementation of the mesos framework api based upon
 `compactor <https://github.com/wickman/compactor>`_.
