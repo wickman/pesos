@@ -3,6 +3,12 @@ CHANGES
 =======
 
 -----
+0.2.2
+-----
+
+* Pins to ``compactor==0.2.2`` which fixes a number of race conditions.
+
+-----
 0.2.1
 -----
 
