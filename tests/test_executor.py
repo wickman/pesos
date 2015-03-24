@@ -28,6 +28,8 @@ FAKE_ENVIRONMENT = {
   'MESOS_CHECKPOINT': '0',
 }
 
+MAX_TIMEOUT = 10
+
 
 @mock.patch.dict('os.environ', FAKE_ENVIRONMENT)
 class TestExecutor(unittest.TestCase):
@@ -85,10 +87,11 @@ class TestExecutor(unittest.TestCase):
     driver = PesosExecutorDriver(executor, context=self.context)
     assert driver.start() == mesos_pb2.DRIVER_RUNNING
 
-    driver.executor_process.connected.wait()
+    driver.executor_process.connected.wait(timeout=MAX_TIMEOUT)
     assert driver.executor_process.connected.is_set()
 
-    registered_event.wait()
+    registered_event.wait(timeout=MAX_TIMEOUT)
+    assert registered_event.is_set()
     assert registered_call.mock_calls == [
         mock.call(driver, self.executor_info, self.framework_info, self.slave.slave_info)]
 
@@ -107,16 +110,17 @@ class TestExecutor(unittest.TestCase):
     driver = PesosExecutorDriver(executor, context=driver_context)
     assert driver.start() == mesos_pb2.DRIVER_RUNNING
 
-    driver.executor_process.connected.wait()
+    driver.executor_process.connected.wait(timeout=MAX_TIMEOUT)
     assert driver.executor_process.connected.is_set()
-    self.slave.register_event.wait()
+    self.slave.register_event.wait(timeout=MAX_TIMEOUT)
+    assert self.slave.register_event.is_set()
 
     # kill connection
     conn = driver_context._connections[self.slave.pid]
     conn.close()
 
     # abort event
-    shutdown_event.wait()
+    shutdown_event.wait(timeout=MAX_TIMEOUT)
     assert shutdown_event.is_set()
     assert shutdown_call.mock_calls == [mock.call(driver)]
 
@@ -135,8 +139,9 @@ class TestExecutor(unittest.TestCase):
     driver = PesosExecutorDriver(executor, context=driver_context)
     assert driver.start() == mesos_pb2.DRIVER_RUNNING
 
-    self.slave.register_event.wait()
-    driver.executor_process.connected.wait()
+    self.slave.register_event.wait(timeout=MAX_TIMEOUT)
+    assert self.slave.register_event.is_set()
+    driver.executor_process.connected.wait(timeout=MAX_TIMEOUT)
     assert driver.executor_process.connected.is_set()
 
     # kill connection, but expect reconnect
@@ -147,12 +152,13 @@ class TestExecutor(unittest.TestCase):
     self.slave.send_reconnect(driver.executor_process.pid)
 
     # wait for reregister event
-    self.slave.reregister_event.wait()
-    driver.executor_process.connected.wait()
+    self.slave.reregister_event.wait(timeout=MAX_TIMEOUT)
+    assert self.slave.reregister_event.is_set()
+    driver.executor_process.connected.wait(timeout=MAX_TIMEOUT)
     assert driver.executor_process.connected.is_set()
 
     # reregistered event
-    reregistered_event.wait()
+    reregistered_event.wait(timeout=MAX_TIMEOUT)
     assert reregistered_event.is_set()
     assert reregistered_call.mock_calls == [mock.call(driver, self.slave.slave_info)]
 
@@ -167,7 +173,8 @@ class TestExecutor(unittest.TestCase):
     assert driver.start() == mesos_pb2.DRIVER_RUNNING
 
     # wait until registered
-    driver.executor_process.connected.wait()
+    driver.executor_process.connected.wait(timeout=MAX_TIMEOUT)
+    assert driver.executor_process.connected.is_set()
 
     # now launch task
     task_info = mesos_pb2.TaskInfo(
@@ -182,7 +189,8 @@ class TestExecutor(unittest.TestCase):
         task_info,
     )
 
-    launch_task_event.wait()
+    launch_task_event.wait(timeout=MAX_TIMEOUT)
+    assert launch_task_event.is_set()
     assert launch_task_call.mock_calls == [mock.call(driver, task_info)]
     assert driver.executor_process.tasks == {task_info.task_id.value: task_info}
 
@@ -197,7 +205,8 @@ class TestExecutor(unittest.TestCase):
     assert driver.start() == mesos_pb2.DRIVER_RUNNING
 
     # wait until registered
-    driver.executor_process.connected.wait()
+    driver.executor_process.connected.wait(timeout=MAX_TIMEOUT)
+    assert driver.executor_process.connected.is_set()
 
     # now launch task
     task_id = mesos_pb2.TaskID(value='task-id')
@@ -207,7 +216,8 @@ class TestExecutor(unittest.TestCase):
         task_id,
     )
 
-    kill_task_event.wait()
+    kill_task_event.wait(timeout=MAX_TIMEOUT)
+    assert kill_task_event.is_set()
     assert kill_task_call.mock_calls == [mock.call(driver, task_id)]
 
   def test_mesos_executor_framework_message_delivery(self):
@@ -222,7 +232,8 @@ class TestExecutor(unittest.TestCase):
     assert driver.start() == mesos_pb2.DRIVER_RUNNING
 
     # wait until registered
-    driver.executor_process.connected.wait()
+    driver.executor_process.connected.wait(timeout=MAX_TIMEOUT)
+    assert driver.executor_process.connected.is_set()
 
     self.slave.send_framework_message(
         driver.executor_process.pid,
@@ -231,7 +242,8 @@ class TestExecutor(unittest.TestCase):
         data=b'beep boop beep',
     )
 
-    framework_message_event.wait()
+    framework_message_event.wait(timeout=MAX_TIMEOUT)
+    assert framework_message_event.is_set()
     assert framework_message_call.mock_calls == [mock.call(driver, b'beep boop beep')]
 
   def test_mesos_executor_shutdown(self):
@@ -245,11 +257,13 @@ class TestExecutor(unittest.TestCase):
     assert driver.start() == mesos_pb2.DRIVER_RUNNING
 
     # wait until registered
-    driver.executor_process.connected.wait()
+    driver.executor_process.connected.wait(timeout=MAX_TIMEOUT)
+    assert driver.executor_process.connected.is_set()
 
     self.slave.send_shutdown(driver.executor_process.pid)
 
-    shutdown_event.wait()
+    shutdown_event.wait(timeout=MAX_TIMEOUT)
+    assert shutdown_event.is_set()
     assert shutdown_call.mock_calls == [mock.call(driver)]
 
   # -- Driver delivery tests
@@ -269,7 +283,8 @@ class TestExecutor(unittest.TestCase):
     driver = PesosExecutorDriver(executor, context=self.context)
     assert driver.start() == mesos_pb2.DRIVER_RUNNING
     assert driver.abort() == mesos_pb2.DRIVER_ABORTED
-    driver.executor_process.aborted.wait()
+    driver.executor_process.aborted.wait(timeout=MAX_TIMEOUT)
+    assert driver.executor_process.aborted.is_set()
     assert driver.join() == mesos_pb2.DRIVER_ABORTED
 
   def test_mesos_executor_driver_run_and_abort(self):
@@ -285,11 +300,11 @@ class TestExecutor(unittest.TestCase):
 
     threading.Thread(target=runner).start()
     assert not join_event.is_set()
-    driver.started.wait(timeout=10)
+    driver.started.wait(timeout=MAX_TIMEOUT)
     assert driver.started.is_set()
 
     assert driver.abort() == mesos_pb2.DRIVER_ABORTED
-    join_event.wait(timeout=10)
+    join_event.wait(timeout=MAX_TIMEOUT)
     assert join_event.is_set()
 
   def test_mesos_executor_driver_framework_message(self):
@@ -300,11 +315,13 @@ class TestExecutor(unittest.TestCase):
     assert driver.start() == mesos_pb2.DRIVER_RUNNING
 
     # wait until registered
-    driver.executor_process.connected.wait()
+    driver.executor_process.connected.wait(timeout=MAX_TIMEOUT)
+    assert driver.executor_process.connected.is_set()
 
     # send and wait for framework message
     assert driver.send_framework_message(b'beep boop beep') == mesos_pb2.DRIVER_RUNNING
-    self.slave.framework_message_event.wait()
+    self.slave.framework_message_event.wait(timeout=MAX_TIMEOUT)
+    assert self.slave.framework_message_event.is_set()
 
     framework_message = internal.ExecutorToFrameworkMessage(
         slave_id=self.slave.slave_id,
@@ -325,7 +342,8 @@ class TestExecutor(unittest.TestCase):
     assert driver.start() == mesos_pb2.DRIVER_RUNNING
 
     # wait until registered
-    driver.executor_process.connected.wait()
+    driver.executor_process.connected.wait(timeout=MAX_TIMEOUT)
+    assert driver.executor_process.connected.is_set()
 
     task_status = mesos_pb2.TaskStatus(
         task_id=mesos_pb2.TaskID(value='task-id'),
@@ -333,7 +351,8 @@ class TestExecutor(unittest.TestCase):
     )
 
     assert driver.send_status_update(task_status) == mesos_pb2.DRIVER_RUNNING
-    self.slave.status_update_event.wait()
+    self.slave.status_update_event.wait(timeout=MAX_TIMEOUT)
+    assert self.slave.status_update_event.is_set()
 
     assert len(self.slave.status_updates) == 1
     assert self.slave.status_updates[0][0] == driver.executor_process.pid
