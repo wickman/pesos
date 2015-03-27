@@ -82,14 +82,12 @@ class FutureMasterDetector(MasterDetector):
     self._future_queue = []  # list of queued detection requests
 
   def fail(self, exception):
-    print('grabbing lock.')
     with self.__lock:
       future_queue, self._future_queue = self._future_queue, []
       for future in future_queue:
         future.set_exception(exception)
 
   def appoint(self, leader):
-    print('grabbing lock.')
     with self.__lock:
       if leader == self._leader:
         log.info('FutureMasterDetector.appoint skipping identical appointment %s' % leader)
@@ -98,14 +96,10 @@ class FutureMasterDetector(MasterDetector):
         log.info('FutureMasterDetector.appoint accepting appointment %s' % leader)
       self._leader = leader
       future_queue, self._future_queue = self._future_queue, []
-      print('Crunching through future queue')
       for future in future_queue:
-        print('Finishing future: %s' % future)
         future.set_result(leader)
-      print('Done')
 
   def detect(self, previous=None):
-    print('grabbing lock.')
     with self.__lock:
       future = Future()
       if previous != self._leader:

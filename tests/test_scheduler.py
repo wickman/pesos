@@ -126,6 +126,7 @@ class TestScheduler(unittest.TestCase):
     standby_master.reregister_event.wait(timeout=MAX_TIMEOUT)
     assert standby_master.reregister_event.is_set()
     assert standby_master.frameworks == self.master.frameworks
+    reregistered_event.wait(timeout=MAX_TIMEOUT)
     assert reregistered_event.is_set()
     assert driver.stop() == mesos_pb2.DRIVER_STOPPED
 
