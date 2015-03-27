@@ -13,7 +13,7 @@ setup(
   license='Apache License 2.0',
   packages=find_packages(exclude=['tests']),
   install_requires=[
-    'compactor[pb]==0.2.2',
+    'compactor[pb]==0.3.0',
     'futures==2.1.6',
     'mesos.interface==0.21.1',
   ],
