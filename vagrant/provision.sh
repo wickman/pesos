@@ -49,6 +49,7 @@ function start_services {
 }
 
 function prepare_python {
+  pip install pex
   pip install wheel
 }
 

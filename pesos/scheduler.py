@@ -7,7 +7,7 @@ import time
 import socket
 import sys
 
-from .detector import StandaloneMasterDetector
+from .detector import MasterDetector
 from .util import camel_call, timed, unique_suffix
 from .vendor.mesos import mesos_pb2
 from .vendor.mesos.internal import messages_pb2 as internal
@@ -21,6 +21,10 @@ log = logging.getLogger(__name__)
 
 
 class SchedulerProcess(ProtobufProcess):
+  MASTER_DETECTION_RETRY_SECONDS = 10
+  MASTER_INITIAL_BACKOFF_SECONDS = 2
+  MASTER_MAX_BACKOFF_SECONDS = 60
+
   def __init__(self, driver, scheduler, framework, credential=None, detector=None, clock=time):
     self.driver = driver
     self.scheduler = scheduler
@@ -31,6 +35,9 @@ class SchedulerProcess(ProtobufProcess):
     self.connected = threading.Event()
     self.aborted = threading.Event()
     self.failover = threading.Event()
+
+    if framework.HasField('id'):
+      self.failover.set()
 
     # credentials
     self.credential = credential
@@ -51,6 +58,9 @@ class SchedulerProcess(ProtobufProcess):
 
   def initialize(self):
     super(SchedulerProcess, self).initialize()
+    self.context.dispatch(self.pid, 'detect')
+
+  def detect(self):
     self.detector.detect(previous=self.master).add_done_callback(self.detected)
 
   def ignore_if_aborted(method):
@@ -80,12 +90,11 @@ class SchedulerProcess(ProtobufProcess):
   @ignore_if_aborted
   def detected(self, master_future):
     try:
-      master_uri = master_future.result()
+      master_pid = master_future.result()
     except Exception as e:
-      log.fatal('Failed to detect master: %s' % e)
-      # TODO(wickman) Are we on MainThread?  If not, this might not actually terminate anything
-      # but this thread.
-      sys.exit(1)
+      log.warning('Experienced an error detecting master: %s, retrying...' % e)
+      self.context.delay(self.MASTER_DETECTION_RETRY_SECONDS, self.pid, 'detect')
+      return
 
     if self.connected.is_set():
       self.connected.clear()
@@ -93,22 +102,23 @@ class SchedulerProcess(ProtobufProcess):
         camel_call(self.scheduler, 'disconnected', self.driver)
 
     # TODO(wickman) Implement authentication.
-    if master_uri:
-      log.info('New master detected: %s' % master_uri)
-      self.master = PID.from_string("master@%s" % master_uri)
+    if master_pid:
+      log.info('New master detected: %s' % master_pid)
+      self.master = master_pid
       self.link(self.master)
     else:
+      log.info('Master disconnected.')
       self.master = None
 
-    self.__maybe_register()
+    self._do_registration()
 
-    # TODO(wickman) Detectors should likely operate on PIDs and not URIs.
-    self.detector.detect(previous=master_uri).add_done_callback(self.detected)
+    log.info('Setting transition watch from previous master: %s' % master_pid)
+    self.context.dispatch(self.pid, 'detect')
 
-  # TODO(wickman) Implement reliable registration -- i.e. __maybe_register() should operate
-  # in a loop until self.connected.is_set().
-  def __maybe_register(self):
+  def _do_registration(self, backoff=MASTER_INITIAL_BACKOFF_SECONDS):
     if self.connected.is_set() or self.master is None:
+      log.info('Skipping registration because we are either connected or '
+               'there is no appointed master.')
       return
 
     # We have never registered before
@@ -121,6 +131,13 @@ class SchedulerProcess(ProtobufProcess):
       log.info('Reregistering framework: %s' % message)
 
     self.send(self.master, message)
+
+    # run a backoff loop
+    self.context.delay(
+        backoff,
+        self.pid,
+        '_do_registration',
+        max(backoff * 2, self.MASTER_MAX_BACKOFF_SECONDS))
 
   @ProtobufProcess.install(internal.FrameworkRegisteredMessage)
   @ignore_if_aborted
@@ -328,10 +345,11 @@ class SchedulerProcess(ProtobufProcess):
   @ignore_if_disconnected
   def reconcile_tasks(self, statuses):
     assert self.master is not None
-    message = internal.ReviveOffersMessage(framework_id=self.framework.id, statuses=statuses)
+    message = internal.ReconcileTasksMessage(framework_id=self.framework.id, statuses=statuses)
     self.send(self.master, message)
 
   del ignore_if_aborted
+  del ignore_if_disconnected
 
 
 class PesosSchedulerDriver(SchedulerDriver):
@@ -353,19 +371,17 @@ class PesosSchedulerDriver(SchedulerDriver):
         return method(self, *args, **kw)
     return _wrapper
 
-  def _initialize_detector(self):
-    if self.master_uri.startswith("zk:"):
-      raise Exception("The zookeeper master detector is not supported")
-
-    return StandaloneMasterDetector(self.master_uri)
-
   @locked
   def start(self):
     if self.status is not mesos_pb2.DRIVER_NOT_STARTED:
       return self.status
 
-    if self.detector is None:
-      self.detector = self._initialize_detector()
+    try:
+      self.detector = MasterDetector.from_uri(self.master_uri)
+    except MasterDetector.Error as e:
+      self.status = mesos_pb2.DRIVER_ABORTED
+      self.scheduler.error('Failed to construct master detector: %s' % e)
+      return
 
     assert self.scheduler_process is None
     self.scheduler_process = SchedulerProcess(
