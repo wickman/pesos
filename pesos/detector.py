@@ -1,8 +1,24 @@
+import socket
+import struct
 import threading
+
+from .vendor.mesos.mesos_pb2 import MasterInfo
+
+from compactor.pid import PID
 from concurrent.futures import Future
+from kazoo.client import KazooClient
+from twitter.common.zookeeper.group.kazoo_group import KazooGroup
+
+try:
+  from urlparse import urlparse
+except ImportError:
+  from urllib.parse import urlparse
 
 
 class MasterDetector(object):
+  class Error(Exception): pass
+  class InvalidUrl(Error): pass
+
   @classmethod
   def from_url(cls, url):
     raise NotImplementedError
@@ -58,4 +74,45 @@ class StandaloneMasterDetector(FutureMasterDetector):
 
   def __init__(self, leader=None):
     super(StandaloneMasterDetector, self).__init__()
-    self.appoint(leader)
+
+    if leader:
+      self.appoint(leader)
+
+
+class MesosKazooGroup(KazooGroup):
+  MEMBER_PREFIX = 'info_'
+
+
+class ZookeeperMasterDetector(FutureMasterDetector):
+  def __init__(self, url, client=None):
+    super(ZookeeperMasterDetector, self).__init__()
+
+    url = urlparse(url)
+    if url.scheme.lower() != 'zk':
+      raise self.InvalidUrl('ZookeeperMasterDetector got bad ensemble url: %s' % (url,))
+
+    if client:  # for mocking
+      self._kazoo_client = client
+    else:
+      self._kazoo_client = KazooClient(url.netloc)
+      self._kazoo_client.start_async()
+
+    self._group = MesosKazooGroup(self._kazoo_client, url.path)
+    self._group.monitor(callback=self._on_change)
+
+  def _on_change(self, membership):
+    if membership:
+      leader = sorted(membership)[0]
+      self._group.info(leader, callback=self._on_appointment)
+    self._group.monitor(membership, callback=self._on_change)
+
+  def _on_appointment(self, master_data):
+    master_info = MasterInfo()
+    master_info.MergeFromString(master_data)
+    ip, port, id_ = (
+        socket.inet_ntoa(struct.pack('<L', master_info.ip)),
+        master_info.port,
+        master_info.id)
+    master_pid = PID(ip, port, id_)
+    self.appoint(master_pid)
+

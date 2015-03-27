@@ -17,5 +17,8 @@ setup(
     'futures==2.1.6',
     'mesos.interface==0.21.1',
   ],
+  extras_require={
+    'zk': ['twitter.common.zookeeper==0.3.4'],
+  },
   zip_safe=True
 )
